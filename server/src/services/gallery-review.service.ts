@@ -161,7 +161,6 @@ export class GalleryReviewService {
         WHERE owner_id=${auth.user.id} AND id=${dto.operationId}`.execute(db);
       if (prior) {
         if (
-          prior.session_id !== this.session(auth) ||
           prior.asset_id !== dto.assetId ||
           prior.action !== dto.action ||
           prior.server_selected !== dto.server ||
@@ -267,7 +266,6 @@ export class GalleryReviewService {
           VALUES(${auth.user.id},${id},${this.session(auth)}) ON CONFLICT DO NOTHING`.execute(db);
         return null;
       }
-      if (op.session_id !== this.session(auth)) throw new ForbiddenException('Operation not owned by this session');
       if (op.undone) return null;
       await requireAccess(this.access, { auth, permission: Permission.AssetDelete, ids: [op.asset_id] });
       const { rows: newer } = await sql`SELECT id FROM gallery_review.operation WHERE owner_id=${auth.user.id}

@@ -26,7 +26,7 @@ All paths below are relative to `/api/gallery-review`. POST bodies reject unknow
 | POST exclusions | Up to 1000 SHA-1 base64 `checksums`; returns `blocked` checksums |
 | POST decisions | UUID `operationId`, owned `assetId`, `action` (`trash`/`restore`), `server`, device UUID array `devices` |
 | GET decisions/:id | `undone` and destination delivery states; superseded work is explicitly reported |
-| POST decisions/:id/undo | Session-owned idempotent Undo; also cancels an uncertain request that never reached the server |
+| POST decisions/:id/undo | Account-owned idempotent Undo; also cancels an uncertain request that never reached the server |
 
 Device identity is scoped to an authenticated login session. Revoking it disables the entry; logging in again registers a new entry. Devices are not discoverable/manageable across accounts. The server rechecks destination settings when accepting a decision; the phone checks its current setting again before native mutation. Opt-out cancels queued commands rather than replaying them after a later opt-in.
 
@@ -34,7 +34,7 @@ Device identity is scoped to an authenticated login session. Revoking it disable
 
 The migration adds the `gallery_review` schema, plus an asset trigger. No upstream API schema changes are needed. The trigger captures stock trash/restore/purge events, preserves exclusions for Live Photo motion files, and does not broaden a prior selective decision during background purge. Custom decisions suppress broadcast within their transaction and enqueue only selected destinations.
 
-Account-scoped transaction locks serialize review decisions and Undo. A client operation UUID makes retries idempotent. Each device/checksum has a revision so late acknowledgements cannot acknowledge a newer action. Undo refuses to overwrite subsequent server trash-state changes or newer review decisions. Metadata-only changes do not invalidate Undo. Permanently removed server media cannot be restored; Undo reports a conflict in that case.
+Account-scoped transaction locks serialize review decisions and Undo. A client operation UUID makes retries idempotent. Recovery is account-owned so signing in again can resolve a pending server decision after the old session is revoked; device registration itself remains session-bound. Each device/checksum has a revision so late acknowledgements cannot acknowledge a newer action. Undo refuses to overwrite subsequent server trash-state changes or newer review decisions. Metadata-only changes do not invalidate Undo. Permanently removed server media cannot be restored; Undo reports a conflict in that case.
 
 Modified uploads check exclusions both before and after insert, protecting against concurrent purge/uniqueness races. The phone also filters backup candidates. Upload exclusions are user-owned and deleted when that account is removed.
 

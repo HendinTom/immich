@@ -234,6 +234,17 @@ it('server-only Live Photo purge keeps the motion copy excluded without queuing 
   });
 });
 
+it('same-account sign-in can recover a pending server decision after the old session is revoked', async () => {
+  const { auth, other, asset } = await scenario();
+  const dto = decision(asset.id);
+  await sut.decide(auth, dto);
+  await db.deleteFrom('session').where('id', '=', auth.session!.id).execute();
+  await sut.decide(other, dto);
+  expect(await state(asset.id)).toBe('trashed');
+  await sut.undo(other, dto.operationId);
+  expect(await state(asset.id)).toBe('active');
+});
+
 it('extension rollback/reapply preserves upstream assets', async () => {
   const before = await db.selectFrom('asset').select('id').execute();
   await down(db);
