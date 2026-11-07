@@ -160,6 +160,14 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
       final item = await api.assetsApi.getAssetInfo(pendingId);
       _checkAccount();
       if (item != null && item.ownerId == userId) {
+        // The visible next card has already been removed from the buffer.
+        // Put it back before Undo replaces it, otherwise deciding the restored
+        // card again skips that still-unreviewed card until the next refill.
+        final displaced = _asset;
+        if (displaced != null && displaced.id != item.id && !_session!.reviewed.contains(displaced.id)) {
+          _buffer.removeWhere((queued) => queued.id == displaced.id);
+          _buffer.insert(0, displaced);
+        }
         _asset = item;
         return;
       }
