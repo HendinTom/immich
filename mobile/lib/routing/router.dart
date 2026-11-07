@@ -11,6 +11,7 @@ import 'package:immich_mobile/domain/models/memory.model.dart';
 import 'package:immich_mobile/domain/models/person.model.dart';
 import 'package:immich_mobile/domain/models/user.model.dart';
 import 'package:immich_mobile/domain/services/timeline.service.dart';
+import 'package:immich_mobile/features/gallery_review/review_page.dart';
 import 'package:immich_mobile/models/folder/recursive_folder.model.dart';
 import 'package:immich_mobile/models/shared_link/shared_link.model.dart';
 import 'package:immich_mobile/models/upload/share_intent_attachment.model.dart';
@@ -164,6 +165,7 @@ class AppRouter extends RootStackRouter {
     AutoRoute(page: MemoryRoute.page, guards: [_authGuard, _duplicateGuard]),
     AutoRoute(page: FavoriteRoute.page, guards: [_authGuard, _duplicateGuard]),
     AutoRoute(page: TrashRoute.page, guards: [_authGuard, _duplicateGuard]),
+    AutoRoute(page: GalleryReviewRoute.page, guards: [_authGuard, _duplicateGuard]),
     AutoRoute(page: ArchiveRoute.page, guards: [_authGuard, _duplicateGuard]),
     AutoRoute(page: LockedFolderRoute.page, guards: [_authGuard, _lockedGuard, _duplicateGuard]),
     AutoRoute(page: VideoRoute.page, guards: [_authGuard, _duplicateGuard]),

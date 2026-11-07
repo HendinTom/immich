@@ -21,6 +21,8 @@ import 'package:immich_mobile/widgets/common/immich_sliver_app_bar.dart';
 import 'package:immich_mobile/widgets/map/map_thumbnail.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 
+final _reviewOpenProvider = StateProvider<bool>((ref) => false);
+
 @RoutePage()
 class LibraryPage extends StatelessWidget {
   const LibraryPage({super.key});
@@ -52,6 +54,27 @@ class _ActionButtonGrid extends ConsumerWidget {
       sliver: SliverToBoxAdapter(
         child: Column(
           children: [
+            Row(
+              children: [
+                _ActionButton(
+                  icon: Icons.swipe,
+                  label: 'Review',
+                  onTap: () async {
+                    // Remove the native map surface while Review covers Library.
+                    // Software-rendered Android can otherwise composite it above the new route.
+                    ref.read(_reviewOpenProvider.notifier).state = true;
+                    try {
+                      await context.pushRoute(const GalleryReviewRoute());
+                    } finally {
+                      if (context.mounted) {
+                        ref.read(_reviewOpenProvider.notifier).state = false;
+                      }
+                    }
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
             Row(
               children: [
                 _ActionButton(
@@ -124,22 +147,22 @@ class _ActionButton extends StatelessWidget {
   }
 }
 
-class _CollectionCards extends StatelessWidget {
+class _CollectionCards extends ConsumerWidget {
   const _CollectionCards();
 
   @override
-  Widget build(BuildContext context) {
-    return const SliverPadding(
-      padding: EdgeInsets.symmetric(horizontal: 16),
+  Widget build(BuildContext context, WidgetRef ref) {
+    return SliverPadding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       sliver: SliverToBoxAdapter(
         child: Wrap(
           spacing: 8,
           runSpacing: 8,
           children: [
-            _PeopleCollectionCard(),
-            _PlacesCollectionCard(),
-            _LocalAlbumsCollectionCard(),
-            _MemoriesCollectionCard(),
+            const _PeopleCollectionCard(),
+            if (!ref.watch(_reviewOpenProvider)) const _PlacesCollectionCard(),
+            const _LocalAlbumsCollectionCard(),
+            const _MemoriesCollectionCard(),
           ],
         ),
       ),
