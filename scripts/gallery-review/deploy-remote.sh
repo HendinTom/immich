@@ -5,7 +5,7 @@ umask 077
 bundle=$1
 deployment=$2
 image=$3
-expected_image_id=$4
+expected_config_id=$4
 approved_commit=$5
 cd "$deployment"
 test -f docker-compose.yml
@@ -33,9 +33,12 @@ docker image tag "$old_image" "gallery-review/rollback:$approved_commit"
 docker compose exec -T database sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > "$backup/database.dump"
 test -s "$backup/database.dump"
 docker compose exec -T database pg_restore --list < "$backup/database.dump" > "$backup/database-list.txt"
+# The target uses the classic Docker image store: .Id is the config digest.
+# Docker Desktop/containerd reports an OCI index digest instead; the release
+# records both and verifies the exported config and layer identities locally.
 # The archive is checked by the caller and again in the staging directory.
 gzip -dc "$bundle/server-image.tar.gz" | docker load
-test "$(docker image inspect --format '{{.Id}}' "$image")" = "$expected_image_id"
+test "$(docker image inspect --format '{{.Id}}' "$image")" = "$expected_config_id"
 test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image")" = linux/amd64
 printf '# Managed by Gallery Review deployment\nservices:\n  immich-server:\n    image: %s\n' "$image" > "$override.new"
 mv "$override.new" "$override"

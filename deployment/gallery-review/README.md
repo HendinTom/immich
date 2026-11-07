@@ -70,6 +70,11 @@ that bundle is deliberately rejected by the AMD64 deployment gate.
 
 The ignored `.gallery-review/releases/COMMIT/` bundle contains the compressed
 image, checksums, image ID/platform, commit, smoke evidence and deployment script.
+The manifest records both the local Docker image ID and the SHA-256 of the
+exported image configuration. Docker Desktop reports an OCI index ID; the
+homeserver classic image store reports the config ID. The archive config digest,
+platform, tag and layer identities are checked before publishing the manifest.
+The remote gate compares the config ID on this classic-store target.
 A manifest is written only after all checks pass. Changing source afterward
 requires a new release. Production deploys the tested image, not a rebuild.
 

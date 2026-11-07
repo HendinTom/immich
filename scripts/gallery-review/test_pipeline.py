@@ -1,4 +1,6 @@
 import contextlib
+import hashlib
+import tarfile
 import io
 import json
 from pathlib import Path
@@ -6,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import deploy
-from release import digest
+from release import digest, archive_config
 
 
 class ReleaseGateTests(unittest.TestCase):
@@ -16,14 +18,49 @@ class ReleaseGateTests(unittest.TestCase):
         self.folder = Path(self.temp.name)
         self.commit = 'a' * 40
         self.image_id = 'sha256:' + 'b' * 64
-        (self.folder / 'server-image.tar.gz').write_bytes(b'fixture archive')
+        config = json.dumps({'os': 'linux', 'architecture': 'amd64', 'rootfs': {'diff_ids': []}}).encode()
+        self.config_id = 'sha256:' + hashlib.sha256(config).hexdigest()
+        self.config_path = 'blobs/sha256/' + self.config_id.removeprefix('sha256:')
+        self.archive_members = {'manifest.json': json.dumps([{
+            'Config': self.config_path, 'RepoTags': ['gallery-review/server:' + self.commit], 'Layers': []
+        }]).encode(), self.config_path: config}
+        self.write_archive()
         (self.folder / 'deploy-remote.sh').write_text('# synthetic test fixture\n')
         (self.folder / 'smoke.json').write_text(json.dumps({'passed': True, 'image_id': self.image_id}))
         self.manifest = {'schema': 1, 'commit': self.commit, 'platform': 'linux/amd64',
                          'image': 'gallery-review/server:' + self.commit, 'image_id': self.image_id,
+                         'image_config_id': self.config_id,
                          'files': {name: digest(self.folder / name) for name in
                                    ('server-image.tar.gz', 'smoke.json', 'deploy-remote.sh')}}
         self.save()
+
+    def write_archive(self):
+        with tarfile.open(self.folder / 'server-image.tar.gz', 'w:gz') as saved:
+            for name, data in self.archive_members.items():
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                saved.addfile(info, io.BytesIO(data))
+
+    def test_config_identity_can_differ_from_local_index_identity(self):
+        result = deploy.validate(self.folder, self.commit)
+        self.assertNotEqual(result['image_id'], result['image_config_id'])
+        self.assertEqual(result['image_config_id'], self.config_id)
+
+    def test_wrong_config_identity_rejected(self):
+        self.manifest['image_config_id'] = 'sha256:' + 'f' * 64
+        self.save()
+        with self.assertRaises(ValueError):
+            deploy.validate(self.folder, self.commit)
+
+    def test_corrupt_content_addressed_config_rejected(self):
+        self.archive_members[self.config_path] = b'{}'
+        self.write_archive()
+        with self.assertRaisesRegex(ValueError, 'digest mismatch'):
+            archive_config(self.folder / 'server-image.tar.gz', self.manifest['image'])
+
+    def test_archive_for_different_tag_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'exact release image'):
+            archive_config(self.folder / 'server-image.tar.gz', 'gallery-review/server:wrong')
 
     def save(self):
         (self.folder / 'manifest.json').write_text(json.dumps(self.manifest))

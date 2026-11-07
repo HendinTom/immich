@@ -6,11 +6,13 @@ import gzip
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
+import tarfile
 from lab import ROOT, STATE, require_local_engine
 
 
@@ -38,6 +40,29 @@ def _hash(stream):
     for data in iter(lambda: stream.read(1024 * 1024), b''):
         result.update(data)
     return result.hexdigest()
+
+
+
+def archive_config(archive, image):
+    """Read the content-addressed config without extracting archive paths."""
+    with tarfile.open(archive, 'r:gz') as saved:
+        def read(name):
+            entry = saved.getmember(name)
+            if not entry.isfile() or entry.size > 8 * 1024 * 1024:
+                raise ValueError('Invalid image metadata member')
+            return saved.extractfile(entry).read()
+        manifests = json.loads(read('manifest.json'))
+        if len(manifests) != 1 or manifests[0].get('RepoTags') != [image]:
+            raise ValueError('Archive does not contain the exact release image')
+        name = manifests[0]['Config']
+        match = re.fullmatch(r'(?:blobs/sha256/([0-9a-f]{64})|([0-9a-f]{64})\.json)', name)
+        if not match:
+            raise ValueError('Invalid image config path')
+        data = read(name)
+        config_hash = hashlib.sha256(data).hexdigest()
+        if config_hash != (match[1] or match[2]):
+            raise ValueError('Image config digest mismatch')
+        return 'sha256:' + config_hash, json.loads(data)
 
 
 def main():
@@ -99,10 +124,13 @@ def main():
         process.stdout.close()
         if process.wait():
             raise RuntimeError('Image export failed')
+    config_id, config = archive_config(archive, image)
+    assert config['os'] + '/' + config['architecture'] == args.platform
+    assert config['rootfs']['diff_ids'] == image_info['RootFS']['Layers']
     shutil.copyfile(ROOT / 'scripts/gallery-review/deploy-remote.sh', folder / 'deploy-remote.sh')
     manifest = {
         'schema': 1, 'commit': revision, 'platform': args.platform, 'image': image,
-        'image_id': image_info['Id'], 'upstream_version': '3.3.6',
+        'image_id': image_info['Id'], 'image_config_id': config_id, 'upstream_version': '3.3.6',
         'plugin_build': {'platform': plugin_platform, 'wasm_sha256': plugin_digest},
         'created_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
         'checks': ['server typecheck', 'server unit tests', 'source image build', 'stock API smoke'],
