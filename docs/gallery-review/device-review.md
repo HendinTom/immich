@@ -15,7 +15,7 @@ Selecting **Trash (server only)** changes the gestures/buttons to grey **Nothing
 
 The review journal saves the operation ID and selected destinations before making a request. Retries preserve those choices even after restart. Undo is idempotent. The server rejects Undo if a newer decision or incompatible server state superseded it; permanently deleted originals cannot be restored.
 
-The device worker journals local IDs before native trash, checks OS Trash on retry, and restores only recorded IDs. Managed sync no longer interprets all server deletions as instructions to delete local copies, or all active server copies as instructions to restore local Trash. Server-only deletions persist as account/checksum upload exclusions, including after purge.
+A separate SQLite transaction prevents foreground/background workers from changing receipts concurrently, and releases its lock if a worker exits. The device worker journals local IDs before native trash, checks OS Trash on retry, and restores only recorded IDs. Managed sync no longer interprets all server deletions as instructions to delete local copies, or all active server copies as instructions to restore local Trash. Server-only deletions persist as account/checksum upload exclusions, including after purge.
 
 ## Acceptance checks
 

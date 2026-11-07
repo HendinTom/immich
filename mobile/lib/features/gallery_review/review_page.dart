@@ -292,12 +292,20 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
       }
       final result = await service.api.call('decisions/$id');
       final deliveries = result['devices'] as List;
-      final pending = deliveries.where((d) => d['status'] == 'pending').length;
-      final blocked = deliveries.where((d) => d['status'] == 'blocked').length;
-      final missing = deliveries.where((d) => d['status'] == 'missing').length;
-      final superseded = deliveries.where((d) => d['status'] == 'superseded').length;
-      _deliveryStatus =
-          '$pending device(s) pending · $blocked disabled · $missing with no matching copy · $superseded superseded';
+      final summaries = <String>[];
+      for (final entry in {
+        'applied': 'updated',
+        'pending': 'pending',
+        'blocked': 'disabled',
+        'missing': 'without a matching copy',
+        'superseded': 'superseded',
+      }.entries) {
+        final count = deliveries.where((d) => d['status'] == entry.key).length;
+        if (count > 0) {
+          summaries.add('$count device${count == 1 ? '' : 's'} ${entry.value}');
+        }
+      }
+      _deliveryStatus = summaries.isEmpty ? 'Server action completed.' : summaries.join(' · ');
     } catch (_) {
       _deliveryStatus = 'Decision saved. Device delivery will retry when connected and permitted.';
     }

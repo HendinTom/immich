@@ -97,7 +97,8 @@ class AdvancedSettings extends HookConsumerWidget {
               enabled: true,
               valueNotifier: manageLocalMediaAndroid,
               title: context.t.advanced_settings_sync_remote_deletions_title,
-              subtitle: context.t.advanced_settings_sync_remote_deletions_subtitle,
+              subtitle:
+                  'Allow server and other-device deletions or restores to affect this phone. Review destination choices are respected.',
               onChanged: (value) async {
                 if (value) {
                   final result = await ref.read(permissionRepositoryProvider).requestManageMediaPermission();

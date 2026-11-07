@@ -9,6 +9,7 @@ import 'package:immich_mobile/infrastructure/repositories/trashed_local_asset.re
 import 'package:immich_mobile/repositories/asset_media.repository.dart';
 import 'package:immich_mobile/repositories/permission.repository.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:sqlite3/sqlite3.dart';
 
 class _Api extends Mock implements ReviewApi {}
 
@@ -129,5 +130,18 @@ void main() {
     ).thenAnswer((_) async => {});
     await device.sync();
     verify(() => media.restoreAssetsFromTrash(any())).called(1);
+  });
+  test('another worker connection owns delivery without losing managed mode', () async {
+    final lease = sqlite3.open('${device.file.path}.lease.sqlite');
+    lease.execute('BEGIN EXCLUSIVE');
+    try {
+      expect(await device.sync(), isTrue);
+      verifyNever(() => api.call('commands'));
+    } finally {
+      lease.close();
+    }
+    when(() => api.call('commands')).thenAnswer((_) async => []);
+    expect(await device.sync(), isTrue);
+    verify(() => api.call('commands')).called(1);
   });
 }

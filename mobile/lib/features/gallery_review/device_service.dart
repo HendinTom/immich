@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -14,7 +15,9 @@ import 'package:immich_mobile/providers/api.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
 import 'package:immich_mobile/repositories/asset_media.repository.dart';
 import 'package:immich_mobile/repositories/permission.repository.dart';
+import 'package:logging/logging.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:sqlite3/sqlite3.dart';
 
 final reviewDeviceServiceProvider = Provider((ref) {
   final db = ref.watch(driftProvider);
@@ -100,17 +103,49 @@ class ReviewDeviceService {
   }
 
   /// Called even when remote sync is off: self-requested trash is a separate setting.
+  static final _syncs = <String, Future<void>>{};
+
   Future<bool> sync() async {
     final expected = scope;
-    final file = await journalFile(expected);
-    final lock = await File('${file.path}.lock').open(mode: FileMode.append);
-    await lock.lock(FileLock.exclusive);
+    final previous = _syncs[expected] ?? Future<void>.value();
+    final done = Completer<void>();
+    _syncs[expected] = done.future;
     try {
-      if (await register() == null) {
-        return false;
+      await previous;
+      _check(expected);
+      return await _sync();
+    } catch (error, stack) {
+      Logger('ReviewDeviceService').warning('Device delivery deferred', error, stack);
+      rethrow;
+    } finally {
+      done.complete();
+      if (identical(_syncs[expected], done.future)) {
+        unawaited(_syncs.remove(expected));
       }
-      if (!await canManageMedia()) {
-        return true;
+    }
+  }
+
+  Future<bool> _sync() async {
+    final expected = scope;
+    final file = await journalFile(expected);
+    if (await register() == null) {
+      return false;
+    }
+    if (!await canManageMedia()) {
+      return true;
+    }
+    // OS file locks are process-scoped on Android: two Dart isolates can both
+    // acquire one. A separate SQLite transaction serializes connections across
+    // isolates/processes and releases automatically if a worker is terminated.
+    final lease = sqlite3.open('${file.path}.lease.sqlite');
+    try {
+      try {
+        lease.execute('BEGIN EXCLUSIVE');
+      } on SqliteException catch (error) {
+        if (error.resultCode == 5 || error.resultCode == 6) {
+          return true; // Another worker owns delivery; keep managed sync active.
+        }
+        rethrow;
       }
       final state = await _load(file);
       final receipts = Map<String, dynamic>.from(state['receipts'] as Map? ?? {});
@@ -223,8 +258,7 @@ class ReviewDeviceService {
       }
       return true;
     } finally {
-      await lock.unlock();
-      await lock.close();
+      lease.close();
     }
   }
 
