@@ -55,7 +55,11 @@ python3 scripts/gallery-review/release.py --platform linux/amd64
 
 This requires a clean checkout and records the full Git commit. It builds the
 upstream server build stage, runs the server typecheck and unit tests, then
-builds the complete application image (including web). It runs that exact image
+builds the complete application image (including web). The unchanged upstream
+WebAssembly plugin stage builds on the local engine architecture; only portable
+dist files and its manifest enter the target image through a named build context.
+This avoids Binaryen failing under AMD64 emulation on Mac ARM. The release
+manifest records the plugin build platform and WASM checksum. It runs that exact image
 in the disposable lab and repeats the stock API smoke before exporting it.
 For full source builds on the 16 GiB MacBook, allocate 8 GiB memory and 2 GiB
 swap to Docker Desktop; the default 4 GiB allocation exhausted memory compiling

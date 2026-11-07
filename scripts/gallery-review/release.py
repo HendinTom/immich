@@ -10,6 +10,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 from lab import ROOT, STATE, require_local_engine
 
 
@@ -56,9 +57,32 @@ def main():
          '-f', 'server/Dockerfile', '-t', test_image, '.'])
     run(['docker', 'run', '--rm', '--platform', args.platform, '--entrypoint', '/bin/sh',
          '-w', '/usr/src/app/server', test_image, '-ec', 'pnpm run check && pnpm run test --run --maxWorkers=1'])
-    run(['docker', 'buildx', 'build', '--platform', args.platform, '--load',
-         '--label', f'org.opencontainers.image.revision={revision}',
-         '--build-arg', f'BUILD_ID={revision}', '-f', 'server/Dockerfile', '-t', image, '.'])
+    # Binaryen's AMD64 compiler fails under Mac ARM emulation. WebAssembly is
+    # portable, so build the unchanged upstream plugin stage on the engine's
+    # native architecture and provide only its dist/manifest as a named context.
+    arch = output(['docker', 'info', '--format', '{{.Architecture}}'])
+    native = {'aarch64': 'arm64', 'arm64': 'arm64', 'x86_64': 'amd64', 'amd64': 'amd64'}[arch]
+    plugin_platform = 'linux/' + native
+    plugin_image = image + '-plugins'
+    run(['docker', 'buildx', 'build', '--platform', plugin_platform, '--load', '--target', 'plugins',
+         '-f', 'server/Dockerfile', '-t', plugin_image, '.'])
+    with tempfile.TemporaryDirectory(prefix='plugin-context-', dir=STATE) as temporary:
+        context = Path(temporary)
+        source_path = '/usr/src/app/packages/plugin-core'
+        target = context / source_path.lstrip('/')
+        target.mkdir(parents=True)
+        container = output(['docker', 'create', '--platform', plugin_platform, plugin_image])
+        try:
+            run(['docker', 'cp', container + ':' + source_path + '/dist', str(target / 'dist')])
+            run(['docker', 'cp', container + ':' + source_path + '/manifest.json', str(target / 'manifest.json')])
+        finally:
+            run(['docker', 'rm', container])
+        assert (target / 'dist/plugin.wasm').read_bytes()[:8] == b'\x00asm\x01\x00\x00\x00'
+        plugin_digest = digest(target / 'dist/plugin.wasm')
+        run(['docker', 'buildx', 'build', '--platform', args.platform, '--load',
+             '--build-context', 'plugins=' + str(context),
+             '--label', f'org.opencontainers.image.revision={revision}',
+             '--build-arg', f'BUILD_ID={revision}', '-f', 'server/Dockerfile', '-t', image, '.'])
     run([sys.executable, 'scripts/gallery-review/lab.py', 'up', '--image', image, '--platform', args.platform])
     run([sys.executable, 'scripts/gallery-review/smoke.py'])
     smoke = json.loads((STATE / 'smoke.json').read_text())
@@ -79,6 +103,7 @@ def main():
     manifest = {
         'schema': 1, 'commit': revision, 'platform': args.platform, 'image': image,
         'image_id': image_info['Id'], 'upstream_version': '3.3.6',
+        'plugin_build': {'platform': plugin_platform, 'wasm_sha256': plugin_digest},
         'created_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
         'checks': ['server typecheck', 'server unit tests', 'source image build', 'stock API smoke'],
         'files': {name: digest(folder / name) for name in ('server-image.tar.gz', 'smoke.json', 'deploy-remote.sh')},
