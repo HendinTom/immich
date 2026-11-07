@@ -32,6 +32,7 @@ final syncApiRepositoryProvider = Provider((ref) => SyncApiRepository(ref.watch(
 final localSyncServiceProvider = Provider((ref) {
   final db = ref.watch(driftProvider);
   return LocalSyncService(
+    isGalleryManaged: () async => await ref.read(reviewDeviceServiceProvider).register() != null,
     localAlbumRepository: db.localAlbumRepository,
     trashedLocalAssetRepository: db.trashedLocalAssetRepository,
     assetMediaRepository: ref.watch(assetMediaRepositoryProvider),
