@@ -28,3 +28,6 @@ vite.config.js.timestamp-*
 .devcontainer/.env*
 *.tsbuildinfo
 *.tsbuildInfo
+
+# Private Gallery Review lab credentials and release artifacts
+.gallery-review/
