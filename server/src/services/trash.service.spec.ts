@@ -43,7 +43,7 @@ describe(TrashService.name, () => {
 
       await sut.restoreAssets(authStub.user1, { ids: ['asset1', 'asset2'] });
 
-      expect(mocks.trash.restoreAll).toHaveBeenCalledWith(['asset1', 'asset2']);
+      expect(mocks.trash.restoreAll).toHaveBeenCalledWith(['asset1', 'asset2'], authStub.user1.session?.id);
       expect(mocks.job.queue.mock.calls).toEqual([]);
     });
   });
@@ -53,14 +53,14 @@ describe(TrashService.name, () => {
       mocks.trash.getDeletedIds.mockResolvedValue(makeAssetIdStream(0));
       mocks.trash.restore.mockResolvedValue(0);
       await expect(sut.restore(authStub.user1)).resolves.toEqual({ count: 0 });
-      expect(mocks.trash.restore).toHaveBeenCalledWith('user-id');
+      expect(mocks.trash.restore).toHaveBeenCalledWith('user-id', authStub.user1.session?.id);
     });
 
     it('should restore', async () => {
       mocks.trash.getDeletedIds.mockResolvedValue(makeAssetIdStream(1));
       mocks.trash.restore.mockResolvedValue(1);
       await expect(sut.restore(authStub.user1)).resolves.toEqual({ count: 1 });
-      expect(mocks.trash.restore).toHaveBeenCalledWith('user-id');
+      expect(mocks.trash.restore).toHaveBeenCalledWith('user-id', authStub.user1.session?.id);
     });
   });
 

@@ -307,7 +307,7 @@ describe(AssetMediaService.name, () => {
         size: 42,
       };
 
-      mocks.asset.create.mockResolvedValue(assetEntity);
+      mocks.asset.createForUpload.mockResolvedValue(assetEntity);
 
       await expect(
         sut.uploadAsset(
@@ -317,7 +317,7 @@ describe(AssetMediaService.name, () => {
         ),
       ).rejects.toBeInstanceOf(BadRequestException);
 
-      expect(mocks.asset.create).not.toHaveBeenCalled();
+      expect(mocks.asset.createForUpload).not.toHaveBeenCalled();
       expect(mocks.asset.remove).not.toHaveBeenCalled();
       expect(mocks.job.queue).toHaveBeenCalledWith({
         name: JobName.FileDelete,
@@ -342,14 +342,14 @@ describe(AssetMediaService.name, () => {
         size: 42,
       };
 
-      mocks.asset.create.mockResolvedValue(assetEntity);
+      mocks.asset.createForUpload.mockResolvedValue(assetEntity);
 
       await expect(sut.uploadAsset(authStub.user1, createDto, file)).resolves.toEqual({
         id: 'id_1',
         status: AssetMediaStatus.CREATED,
       });
 
-      expect(mocks.asset.create).toHaveBeenCalled();
+      expect(mocks.asset.createForUpload).toHaveBeenCalled();
       expect(mocks.storage.utimes).toHaveBeenCalledWith(
         file.originalPath,
         expect.any(Date),
@@ -369,7 +369,7 @@ describe(AssetMediaService.name, () => {
       const error = new Error('unique key violation');
       (error as any).constraint_name = ASSET_CHECKSUM_CONSTRAINT;
 
-      mocks.asset.create.mockRejectedValue(error);
+      mocks.asset.createForUpload.mockRejectedValue(error);
       mocks.asset.getUploadAssetIdByChecksum.mockResolvedValue(assetEntity.id);
 
       await expect(sut.uploadAsset(authStub.user1, createDto, file)).resolves.toEqual({
@@ -396,7 +396,7 @@ describe(AssetMediaService.name, () => {
       const error = new Error('unique key violation');
       (error as any).constraint_name = ASSET_CHECKSUM_CONSTRAINT;
 
-      mocks.asset.create.mockRejectedValue(error);
+      mocks.asset.createForUpload.mockRejectedValue(error);
 
       await expect(sut.uploadAsset(authStub.user1, createDto, file)).rejects.toBeInstanceOf(
         InternalServerErrorException,
@@ -415,7 +415,7 @@ describe(AssetMediaService.name, () => {
         .build();
       const asset = AssetFactory.create({ livePhotoVideoId: motionAsset.id });
       mocks.asset.getById.mockResolvedValueOnce(getForAsset(motionAsset));
-      mocks.asset.create.mockResolvedValueOnce(asset);
+      mocks.asset.createForUpload.mockResolvedValueOnce(asset);
 
       await expect(
         sut.uploadAsset(authStub.user1, { ...createDto, livePhotoVideoId: motionAsset.id }, fileStub.livePhotoStill),
@@ -432,7 +432,7 @@ describe(AssetMediaService.name, () => {
       const motionAsset = AssetFactory.from({ type: AssetType.Video }).owner(authStub.user1.user).build();
       const asset = AssetFactory.create();
       mocks.asset.getById.mockResolvedValueOnce(getForAsset(motionAsset));
-      mocks.asset.create.mockResolvedValueOnce(asset);
+      mocks.asset.createForUpload.mockResolvedValueOnce(asset);
 
       await expect(
         sut.uploadAsset(authStub.user1, { ...createDto, livePhotoVideoId: motionAsset.id }, fileStub.livePhotoStill),
@@ -451,7 +451,7 @@ describe(AssetMediaService.name, () => {
     it('should handle a sidecar file', async () => {
       const asset = AssetFactory.from().file({ type: AssetFileType.Sidecar }).build();
       mocks.asset.getById.mockResolvedValueOnce(getForAsset(asset));
-      mocks.asset.create.mockResolvedValueOnce(asset);
+      mocks.asset.createForUpload.mockResolvedValueOnce(asset);
 
       await expect(sut.uploadAsset(authStub.user1, createDto, fileStub.photo, fileStub.photoSidecar)).resolves.toEqual({
         status: AssetMediaStatus.CREATED,

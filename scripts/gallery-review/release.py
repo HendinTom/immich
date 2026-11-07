@@ -82,6 +82,7 @@ def main():
          '-f', 'server/Dockerfile', '-t', test_image, '.'])
     run(['docker', 'run', '--rm', '--platform', args.platform, '--entrypoint', '/bin/sh',
          '-w', '/usr/src/app/server', test_image, '-ec', 'pnpm run check && pnpm run test --run --maxWorkers=1'])
+    run(['python3', str(ROOT / 'scripts/gallery-review/policy_checks.py'), '--image', test_image, '--platform', args.platform])
     # Binaryen's AMD64 compiler fails under Mac ARM emulation. WebAssembly is
     # portable, so build the unchanged upstream plugin stage on the engine's
     # native architecture and provide only its dist/manifest as a named context.
@@ -133,7 +134,7 @@ def main():
         'image_id': image_info['Id'], 'image_config_id': config_id, 'upstream_version': '3.3.6',
         'plugin_build': {'platform': plugin_platform, 'wasm_sha256': plugin_digest},
         'created_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        'checks': ['server typecheck', 'server unit tests', 'source image build', 'stock API smoke'],
+        'checks': ['server typecheck', 'server unit tests', 'device policy integration tests', 'source image build', 'stock API smoke'],
         'files': {name: digest(folder / name) for name in ('server-image.tar.gz', 'smoke.json', 'deploy-remote.sh')},
         'rollback': 'Image rollback only after verifying database compatibility; no automatic database downgrade.',
     }

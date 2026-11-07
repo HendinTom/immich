@@ -1,5 +1,5 @@
 import { InjectKysely } from 'nestjs-kysely';
-import type { Kysely } from 'kysely';
+import { sql, type Kysely } from 'kysely';
 import { DummyValue, GenerateSql } from 'src/decorators.js';
 import { AssetStatus } from 'src/enum.js';
 import { DB } from 'src/schema/index.js';
@@ -12,15 +12,18 @@ export class TrashRepository {
   }
 
   @GenerateSql({ params: [DummyValue.UUID] })
-  async restore(userId: string): Promise<number> {
-    const { numUpdatedRows } = await this.db
-      .updateTable('asset')
-      .where('ownerId', '=', userId)
-      .where('status', '=', AssetStatus.Trashed)
-      .set({ status: AssetStatus.Active, deletedAt: null })
-      .executeTakeFirst();
+  async restore(userId: string, sessionId?: string): Promise<number> {
+    return this.db.transaction().execute(async (db) => {
+      if (sessionId) await sql`SELECT set_config('gallery_review.source_session',${sessionId},true)`.execute(db);
+      const { numUpdatedRows } = await db
+        .updateTable('asset')
+        .where('ownerId', '=', userId)
+        .where('status', '=', AssetStatus.Trashed)
+        .set({ status: AssetStatus.Active, deletedAt: null })
+        .executeTakeFirst();
 
-    return Number(numUpdatedRows);
+      return Number(numUpdatedRows);
+    });
   }
 
   @GenerateSql({ params: [DummyValue.UUID] })
@@ -36,18 +39,21 @@ export class TrashRepository {
   }
 
   @GenerateSql({ params: [[DummyValue.UUID]] })
-  async restoreAll(ids: string[]): Promise<number> {
+  async restoreAll(ids: string[], sessionId?: string): Promise<number> {
     if (ids.length === 0) {
       return 0;
     }
 
-    const { numUpdatedRows } = await this.db
-      .updateTable('asset')
-      .where('status', '=', AssetStatus.Trashed)
-      .where('id', 'in', ids)
-      .set({ status: AssetStatus.Active, deletedAt: null })
-      .executeTakeFirst();
+    return this.db.transaction().execute(async (db) => {
+      if (sessionId) await sql`SELECT set_config('gallery_review.source_session',${sessionId},true)`.execute(db);
+      const { numUpdatedRows } = await db
+        .updateTable('asset')
+        .where('status', '=', AssetStatus.Trashed)
+        .where('id', 'in', ids)
+        .set({ status: AssetStatus.Active, deletedAt: null })
+        .executeTakeFirst();
 
-    return Number(numUpdatedRows);
+      return Number(numUpdatedRows);
+    });
   }
 }

@@ -385,10 +385,12 @@ export class AssetService extends BaseService {
     const { ids, force } = dto;
 
     await this.requireAccess({ auth, permission: Permission.AssetDelete, ids });
-    await this.assetRepository.updateAll(ids, {
-      deletedAt: new Date(),
-      status: force ? AssetStatus.Deleted : AssetStatus.Trashed,
-    });
+    await this.assetRepository.updateTrashForSession(
+      ids,
+      new Date(),
+      force ? AssetStatus.Deleted : AssetStatus.Trashed,
+      auth.session?.id,
+    );
     await this.eventRepository.emit(force ? 'AssetDeleteAll' : 'AssetTrashAll', {
       assetIds: ids,
       userId: auth.user.id,
