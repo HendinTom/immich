@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import {
   type ExpressionBuilder,
   type Insertable,
@@ -441,6 +441,34 @@ export class AssetRepository {
       for (const { assetId, key } of items) {
         await tx.deleteFrom('asset_metadata').where('assetId', '=', assetId).where('key', '=', key).execute();
       }
+    });
+  }
+
+  async updateTrashForSession(ids: string[], deletedAt: Date, status: AssetStatus, sessionId?: string) {
+    if (!ids.length) return;
+    await this.db.transaction().execute(async (db) => {
+      if (sessionId) await sql`SELECT set_config('gallery_review.source_session',${sessionId},true)`.execute(db);
+      await db.updateTable('asset').set({ deletedAt, status }).where('id', 'in', ids).execute();
+    });
+  }
+
+  async createForUpload(asset: Insertable<AssetTable>, sessionId?: string) {
+    if (!sessionId) return this.create(asset);
+    return this.db.transaction().execute(async (db) => {
+      const check = async () => {
+        const { rows } = await sql<{ blocked: boolean }>`SELECT EXISTS(
+          SELECT 1 FROM gallery_review.exclusion e
+          JOIN gallery_review.device d ON d.owner_id=e.owner_id
+          WHERE e.owner_id=${asset.ownerId} AND e.checksum=${asset.checksum} AND e.blocked AND d.session_id=${sessionId}
+        ) AS blocked`.execute(db);
+        if (rows[0].blocked)
+          throw new ConflictException('Gallery Review: automatic upload excluded after server deletion');
+      };
+      await check();
+      const created = await db.insertInto('asset').values(asset).returningAll().executeTakeFirstOrThrow();
+      // Check again after a competing purge/unique-key wait before committing.
+      await check();
+      return created;
     });
   }
 

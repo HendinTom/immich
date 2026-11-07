@@ -1,3 +1,4 @@
+import { GalleryReviewService } from 'src/services/gallery-review.service.js';
 import { ActivityService } from 'src/services/activity.service.js';
 import { AlbumService } from 'src/services/album.service.js';
 import { ApiKeyService } from 'src/services/api-key.service.js';
@@ -53,6 +54,7 @@ import { WorkflowExecutionService } from 'src/services/workflow-execution.servic
 import { WorkflowService } from 'src/services/workflow.service.js';
 
 export const services = [
+  GalleryReviewService,
   ApiKeyService,
   ActivityService,
   AlbumService,

@@ -516,10 +516,12 @@ describe(AssetService.name, () => {
 
       await sut.deleteAll(authStub.user1, { ids: ['asset1', 'asset2'], force: false });
 
-      expect(mocks.asset.updateAll).toHaveBeenCalledWith(['asset1', 'asset2'], {
-        deletedAt: expect.any(Date),
-        status: AssetStatus.Trashed,
-      });
+      expect(mocks.asset.updateTrashForSession).toHaveBeenCalledWith(
+        ['asset1', 'asset2'],
+        expect.any(Date),
+        AssetStatus.Trashed,
+        authStub.user1.session?.id,
+      );
       expect(mocks.job.queue.mock.calls).toEqual([]);
     });
   });

@@ -1,4 +1,4 @@
-name: Gallery server foundation
+name: Gallery server
 on:
   pull_request:
     branches: [gallery-main]
@@ -26,6 +26,15 @@ jobs:
       - name: Stop disposable lab
         if: always()
         run: python3 scripts/gallery-review/lab.py down
+  source-policy-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Build current server source and test device policies
+        run: python3 scripts/gallery-review/policy_checks.py
+      - name: Server typecheck and unit tests
+        run: docker run --rm --entrypoint /bin/sh -w /usr/src/app/server gallery-review/policy-tests:local -ec 'pnpm run check && pnpm run test --run --maxWorkers=1'
   source-release:
     # Heavy image build is explicitly requested, not a homelab deployment.
     if: github.event_name == 'workflow_dispatch'

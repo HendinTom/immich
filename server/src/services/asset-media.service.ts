@@ -146,25 +146,28 @@ export class AssetMediaService extends BaseService {
         );
       }
 
-      asset = await this.assetRepository.create({
-        ownerId: auth.user.id,
-        libraryId: null,
+      asset = await this.assetRepository.createForUpload(
+        {
+          ownerId: auth.user.id,
+          libraryId: null,
 
-        checksum: file.checksum,
-        checksumAlgorithm: ChecksumAlgorithm.sha1File,
-        originalPath: file.originalPath,
+          checksum: file.checksum,
+          checksumAlgorithm: ChecksumAlgorithm.sha1File,
+          originalPath: file.originalPath,
 
-        fileCreatedAt: dto.fileCreatedAt,
-        fileModifiedAt: dto.fileModifiedAt,
-        localDateTime: dto.fileCreatedAt,
+          fileCreatedAt: dto.fileCreatedAt,
+          fileModifiedAt: dto.fileModifiedAt,
+          localDateTime: dto.fileCreatedAt,
 
-        type: mimeTypes.assetType(file.originalPath),
-        isFavorite: dto.isFavorite,
-        duration: dto.duration || null,
-        visibility: dto.visibility ?? AssetVisibility.Timeline,
-        livePhotoVideoId: dto.livePhotoVideoId,
-        originalFileName: dto.filename || file.originalName,
-      });
+          type: mimeTypes.assetType(file.originalPath),
+          isFavorite: dto.isFavorite,
+          duration: dto.duration || null,
+          visibility: dto.visibility ?? AssetVisibility.Timeline,
+          livePhotoVideoId: dto.livePhotoVideoId,
+          originalFileName: dto.filename || file.originalName,
+        },
+        auth.session?.id,
+      );
 
       if (dto.metadata?.length) {
         await this.assetRepository.upsertMetadata(asset.id, dto.metadata);

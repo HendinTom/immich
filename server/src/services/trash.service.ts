@@ -16,7 +16,7 @@ export class TrashService extends BaseService {
     }
 
     await this.requireAccess({ auth, permission: Permission.AssetDelete, ids });
-    await this.trashRepository.restoreAll(ids);
+    await this.trashRepository.restoreAll(ids, auth.session?.id);
     await this.eventRepository.emit('AssetRestoreAll', { assetIds: ids, userId: auth.user.id });
 
     this.logger.log(`Restored ${ids.length} asset(s) from trash`);
@@ -25,7 +25,7 @@ export class TrashService extends BaseService {
   }
 
   async restore(auth: AuthDto): Promise<TrashResponseDto> {
-    const count = await this.trashRepository.restore(auth.user.id);
+    const count = await this.trashRepository.restore(auth.user.id, auth.session?.id);
     if (count > 0) {
       this.logger.log(`Restored ${count} asset(s) from trash`);
     }
