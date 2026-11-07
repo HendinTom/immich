@@ -37,3 +37,7 @@ server/src/queries
 server/www/
 
 web/.svelte-kit
+
+# Never send private lab state or release bundles to the builder
+.gallery-review/
+**/__pycache__/

@@ -1,0 +1,48 @@
+name: Gallery server foundation
+on:
+  pull_request:
+    branches: [gallery-main]
+    paths: ['server/**', 'deployment/gallery-review/**', 'scripts/gallery-review/**', '.github/workflows/gallery-server.yml', '.dockerignore']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: gallery-server-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  pipeline-and-stock-api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Validate release gates
+        run: |
+          python3 -m unittest discover -s scripts/gallery-review -p 'test_*.py' -v
+          sh -n scripts/gallery-review/deploy-remote.sh
+      - name: Start disposable lab
+        run: python3 scripts/gallery-review/lab.py up --platform linux/amd64
+      - name: Stock API compatibility
+        run: python3 scripts/gallery-review/smoke.py
+      - name: Stop disposable lab
+        if: always()
+        run: python3 scripts/gallery-review/lab.py down
+  source-release:
+    # Heavy image build is explicitly requested, not a homelab deployment.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Build, test and smoke the exact amd64 release image
+        run: python3 scripts/gallery-review/release.py --platform linux/amd64
+      - name: Retain release manifest and test evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: server-release-evidence
+          path: |
+            .gallery-review/releases/*/manifest.json
+            .gallery-review/releases/*/smoke.json
+          include-hidden-files: true
+      - name: Stop disposable lab
+        if: always()
+        run: python3 scripts/gallery-review/lab.py down
