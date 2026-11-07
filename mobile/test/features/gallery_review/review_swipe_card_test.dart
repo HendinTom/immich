@@ -6,7 +6,13 @@ void main() {
   var keeps = 0;
   var trashes = 0;
 
-  Future<void> mount(WidgetTester tester, {bool enabled = true, bool trashEnabled = true}) async {
+  Future<void> mount(
+    WidgetTester tester, {
+    bool enabled = true,
+    bool trashEnabled = true,
+    bool trashMode = false,
+    bool keepEnabled = true,
+  }) async {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -17,6 +23,8 @@ void main() {
               child: ReviewSwipeCard(
                 enabled: enabled,
                 trashEnabled: trashEnabled,
+                trashMode: trashMode,
+                keepEnabled: keepEnabled,
                 onKeep: () => keeps++,
                 onTrash: () => trashes++,
                 child: const Center(child: Text('Synthetic photo')),
@@ -103,5 +111,15 @@ void main() {
     await tester.drag(find.byType(ReviewSwipeCard), const Offset(180, 0));
     await tester.pumpAndSettle();
     expect(keeps, 0);
+  });
+  testWidgets('Trash review labels Nothing and Restore and disables read-only restoration', (tester) async {
+    await mount(tester, trashMode: true, keepEnabled: false);
+    final media = find.text('Synthetic photo');
+    await tester.drag(media, const Offset(250, 0));
+    await tester.pumpAndSettle();
+    expect(keeps, 0);
+    await tester.drag(media, const Offset(-250, 0));
+    await tester.pumpAndSettle();
+    expect(trashes, 1);
   });
 }

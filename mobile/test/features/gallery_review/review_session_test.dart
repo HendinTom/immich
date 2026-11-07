@@ -87,4 +87,111 @@ void main() {
     expect(session.lastId, 'photo');
     expect(session.reviewed, {'photo'});
   });
+  test('reset clears both review sources without media operations', () async {
+    String? disk;
+    final session = ReviewSession(
+      save: (s) async => disk = s,
+      trash: (_) async => fail('Unexpected trash'),
+      restore: (_) async => fail('Unexpected restore'),
+    );
+    await session.decide('normal', toTrash: false);
+    await session.setTrashMode(true);
+    await session.decide('trashed', toTrash: false);
+    await session.reset();
+    expect(session.reviewed, isEmpty);
+    expect(session.lastId, isNull);
+    await session.setTrashMode(false);
+    expect(session.reviewed, isEmpty);
+    expect(disk, isNotNull);
+  });
+  test('failed reset preserves progress and Undo', () async {
+    var failWrite = false;
+    final session = ReviewSession(
+      save: (_) async {
+        if (failWrite) {
+          throw Exception('disk full');
+        }
+      },
+      trash: (_) async {},
+      restore: (_) async {},
+    );
+    await session.decide('photo', toTrash: false);
+    failWrite = true;
+    await expectLater(session.reset(), throwsException);
+    expect(session.reviewed, {'photo'});
+    expect(session.lastId, 'photo');
+  });
+  test('pending retry retains operation ID and original destinations across restart', () async {
+    String? disk;
+    Map<String, dynamic>? sent;
+    final session = ReviewSession(
+      save: (s) async => disk = s,
+      trash: (_) async {},
+      restore: (_) async {},
+      applyOperation: (op) async {
+        sent = op;
+        throw Exception('timeout');
+      },
+    );
+    await expectLater(
+      session.decide(
+        'photo',
+        toTrash: true,
+        destinations: {
+          'server': false,
+          'devices': ['phone'],
+        },
+      ),
+      throwsException,
+    );
+    await expectLater(session.reset(), throwsStateError);
+    await expectLater(session.setTrashMode(true), throwsStateError);
+    final recovered = ReviewSession(
+      saved: disk,
+      save: (s) async => disk = s,
+      trash: (_) async {},
+      restore: (_) async {},
+      applyOperation: (op) async => expect(op, sent),
+    );
+    await recovered.decide('photo', toTrash: true, destinations: {'server': true, 'devices': []});
+    expect(recovered.pending, isFalse);
+  });
+  test('failed Keep write preserves previous operation for Undo', () async {
+    var failWrite = false;
+    String? undone;
+    final session = ReviewSession(
+      save: (_) async {
+        if (failWrite) {
+          throw Exception('disk full');
+        }
+      },
+      trash: (_) async {},
+      restore: (_) async => fail('legacy restore'),
+      applyOperation: (_) async {},
+      undoOperation: (id) async => undone = id,
+    );
+    await session.decide('photo', toTrash: true, destinations: {'server': true, 'devices': []});
+    final id = session.operation!['operationId'];
+    failWrite = true;
+    await expectLater(session.decide('next', toTrash: false), throwsException);
+    failWrite = false;
+    await session.undo();
+    expect(undone, id);
+  });
+  test('Trash review sends restore and keeps independent progress', () async {
+    Map<String, dynamic>? sent;
+    final session = ReviewSession(
+      save: (_) async {},
+      trash: (_) async {},
+      restore: (_) async {},
+      applyOperation: (op) async => sent = op,
+    );
+    await session.decide('photo', toTrash: false);
+    await session.setTrashMode(true);
+    expect(session.reviewed, isEmpty);
+    await session.decide('photo', toTrash: true, destinations: {'server': true, 'devices': []});
+    expect(sent!['action'], 'restore');
+    await session.setTrashMode(false);
+    expect(session.reviewed, {'photo'});
+  });
 }

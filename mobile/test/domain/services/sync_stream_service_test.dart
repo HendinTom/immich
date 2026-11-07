@@ -52,6 +52,7 @@ void main() {
   late _MockAbortCallbackWrapper mockResetCallbackWrapper;
   late Drift db;
   late bool hasManageMediaPermission;
+  var galleryManaged = false;
 
   setUpAll(() async {
     TestWidgetsFlutterBinding.ensureInitialized();
@@ -149,7 +150,9 @@ void main() {
     when(() => mockSyncStreamRepo.deleteAssetFacesV1(any())).thenAnswer(successHandler);
     when(() => mockSyncMigrationRepo.v20260128CopyExifWidthHeightToAsset()).thenAnswer(successHandler);
 
+    galleryManaged = false;
     sut = SyncStreamService(
+      syncGallery: () async => galleryManaged,
       syncApiRepository: mockSyncApiRepo,
       syncStreamRepository: mockSyncStreamRepo,
       localAssetRepository: mockLocalAssetRepo,
@@ -232,7 +235,9 @@ void main() {
     test("aborts and stops processing if cancelled during iteration", () async {
       final cancellation = Completer<void>();
 
+      galleryManaged = false;
       sut = SyncStreamService(
+        syncGallery: () async => galleryManaged,
         syncApiRepository: mockSyncApiRepo,
         syncStreamRepository: mockSyncStreamRepo,
         localAssetRepository: mockLocalAssetRepo,
@@ -272,7 +277,9 @@ void main() {
         return processingCompleter.future;
       });
 
+      galleryManaged = false;
       sut = SyncStreamService(
+        syncGallery: () async => galleryManaged,
         syncApiRepository: mockSyncApiRepo,
         syncStreamRepository: mockSyncStreamRepo,
         localAssetRepository: mockLocalAssetRepo,
@@ -413,6 +420,17 @@ void main() {
     tearDown(() async {
       await Store.put(StoreKey.manageLocalMediaAndroid, false);
       hasManageMediaPermission = false;
+    });
+
+    test('managed sync does not infer local trash or restore from server state', () async {
+      galleryManaged = true;
+      await simulateEvents([
+        SyncStreamStub.assetTrashed(id: 'remote-1', checksum: 'checksum', ack: 'a', trashedAt: DateTime(2026)),
+        SyncStreamStub.assetModified(id: 'remote-2', checksum: 'checksum-2', ack: 'b'),
+      ]);
+      verifyNever(() => mockAssetMediaRepo.deleteAll(any()));
+      verifyNever(() => mockAssetMediaRepo.restoreAssetsFromTrash(any()));
+      verifyNever(() => mockTrashedLocalAssetRepo.getToRestore());
     });
 
     test("moves backed up local and merged assets to device trash when remote trash events are received", () async {

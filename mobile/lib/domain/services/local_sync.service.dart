@@ -27,6 +27,7 @@ class LocalSyncService {
   final AssetMediaRepository _assetMediaRepository;
   final DevicePermissionRepository _permissionRepository;
   final Completer<void>? _cancellation;
+  final Future<bool> Function()? isGalleryManaged;
   final Logger _log = Logger("DeviceSyncService");
 
   LocalSyncService({
@@ -36,6 +37,7 @@ class LocalSyncService {
     required this._assetMediaRepository,
     required this._permissionRepository,
     this._cancellation,
+    this.isGalleryManaged,
   }) {
     unawaited(_cancellation?.future.then((_) => _nativeSyncApi.cancelSync().onError(_log.warning)));
   }
@@ -371,6 +373,14 @@ class LocalSyncService {
 
     _log.fine("syncTrashedAssets, trashedAssets: ${trashedAssets.map((e) => e.asset.id)}");
     await _trashedLocalAssetRepository.processTrashSnapshot(trashedAssets);
+
+    // A selective review may intentionally leave the server and phone in
+    // different states. Only revisioned device commands may reconcile those
+    // copies. Keep the native inventory, but never infer a mutation from the
+    // server's current trash state on a managed server. Errors fail closed.
+    if (await isGalleryManaged?.call() ?? false) {
+      return;
+    }
 
     final assetsToRestore = await _trashedLocalAssetRepository.getToRestore();
     if (assetsToRestore.isNotEmpty) {

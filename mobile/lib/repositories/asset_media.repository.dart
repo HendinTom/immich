@@ -56,6 +56,15 @@ class AssetMediaRepository {
     return PhotoManager.editor.deleteWithIds(ids);
   }
 
+  Future<Set<String>> getTrashedIds() async {
+    // Pigeon casts the map but leaves nested channel lists as List<Object?>.
+    // Recast the outer map before explicitly checking each nested element.
+    final buckets = (await _nativeSyncApi.getTrashedAssets()).cast<Object?, Object?>();
+    return buckets.values.expand((items) => (items! as List).cast<PlatformAsset>()).map((asset) => asset.id).toSet();
+  }
+
+  Future<bool> isPresent(String id) async => await AssetEntity.fromId(id) != null;
+
   Future<bool> _restoreFromTrashById(String mediaId, int type) async {
     try {
       return await _nativeSyncApi.restoreFromTrashById(mediaId, type);

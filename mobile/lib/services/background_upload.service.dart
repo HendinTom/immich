@@ -13,6 +13,7 @@ import 'package:immich_mobile/domain/models/store.model.dart';
 import 'package:immich_mobile/domain/services/asset.service.dart';
 import 'package:immich_mobile/entities/store.entity.dart';
 import 'package:immich_mobile/extensions/platform_extensions.dart';
+import 'package:immich_mobile/features/gallery_review/device_service.dart';
 import 'package:immich_mobile/infrastructure/repositories/backup.repository.dart';
 import 'package:immich_mobile/infrastructure/repositories/local_asset.repository.dart';
 import 'package:immich_mobile/infrastructure/repositories/settings.repository.dart';
@@ -39,6 +40,7 @@ final backgroundUploadServiceProvider = Provider((ref) {
     db.backupRepository,
     ref.watch(assetMediaRepositoryProvider),
     ref.watch(assetServiceProvider),
+    filterReviewUploads: ref.watch(reviewDeviceServiceProvider).filterUploads,
   );
 
   ref.onDispose(service.dispose);
@@ -92,8 +94,9 @@ class BackgroundUploadService {
     this._localAssetRepository,
     this._backupRepository,
     this._assetMediaRepository,
-    this._assetService,
-  ) {
+    this._assetService, {
+    this.filterReviewUploads,
+  }) {
     _uploadRepository.onUploadStatus = _onUploadCallback;
     _uploadRepository.onTaskProgress = _onTaskProgressCallback;
   }
@@ -104,6 +107,7 @@ class BackgroundUploadService {
   final BackupRepository _backupRepository;
   final AssetMediaRepository _assetMediaRepository;
   final AssetService _assetService;
+  final Future<List<LocalAsset>> Function(List<LocalAsset>)? filterReviewUploads;
   final Logger _logger = Logger('BackgroundUploadService');
 
   final StreamController<TaskStatusUpdate> _taskStatusController = StreamController<TaskStatusUpdate>.broadcast();
@@ -152,7 +156,10 @@ class BackgroundUploadService {
     await _storageRepository.clearCache();
     shouldAbortQueuingTasks = false;
 
-    final candidates = await _backupRepository.getCandidates(userId);
+    var candidates = await _backupRepository.getCandidates(userId);
+    if (filterReviewUploads != null) {
+      candidates = await filterReviewUploads!(candidates);
+    }
     if (candidates.isEmpty) {
       _logger.info("No new backup candidates found, finishing background upload");
       return;

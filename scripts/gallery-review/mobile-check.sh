@@ -26,8 +26,12 @@ else
   flutter pub get --enforce-lockfile
 fi
 dart format --output=none --set-exit-if-changed lib/features/gallery_review test/features/gallery_review
-dart analyze lib/features/gallery_review test/features/gallery_review
-flutter test --no-pub test/features/gallery_review test/domain/services/sync_stream_service_test.dart test/medium/repositories/trashed_local_asset_repository_test.dart
+dart analyze lib/features/gallery_review test/features/gallery_review \
+  lib/domain/services/sync_stream.service.dart lib/domain/services/local_sync.service.dart lib/providers/infrastructure/sync.provider.dart \
+  lib/repositories/asset_media.repository.dart lib/presentation/actions/delete.action.dart \
+  lib/services/foreground_upload.service.dart lib/services/background_upload.service.dart \
+  lib/widgets/settings/advanced_settings.dart
+flutter test --no-pub test/features/gallery_review test/domain/services/sync_stream_service_test.dart test/domain/services/local_sync_service_test.dart test/medium/repositories/trashed_local_asset_repository_test.dart
 if "$build"; then
   flutter build apk --debug --target-platform android-arm64 --no-pub
   python3 - "$root" <<'PY'

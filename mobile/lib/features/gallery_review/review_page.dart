@@ -9,6 +9,7 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/data/store.dart';
 import 'package:immich_mobile/domain/models/store.model.dart';
 import 'package:immich_mobile/entities/store.entity.dart' as settings;
+import 'package:immich_mobile/features/gallery_review/device_service.dart';
 import 'package:immich_mobile/features/gallery_review/review_session.dart';
 import 'package:immich_mobile/features/gallery_review/review_swipe_card.dart';
 import 'package:immich_mobile/features/gallery_review/review_video.dart';
@@ -38,6 +39,13 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
   String? _error;
   String? _scope;
   bool _busy = true;
+  bool _managed = false;
+  bool _started = false;
+  bool _serverSelected = true;
+  List<Map<String, dynamic>> _devices = [];
+  final Set<String> _selectedDevices = {};
+  String? _deliveryStatus;
+  bool get _trashMode => _album == '__trash__';
 
   String get _currentScope => '${settings.Store.get(StoreKey.serverEndpoint)}|${ref.read(currentUserProvider)?.id}';
   void _checkAccount() {
@@ -59,7 +67,38 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
       final folder = await getApplicationSupportDirectory();
       final key = sha256.convert(utf8.encode(_scope!));
       final file = File('${folder.path}/gallery-review-$key.json');
+      final deviceService = ref.read(reviewDeviceServiceProvider);
+      _managed = await deviceService.register() != null;
+      _checkAccount();
+      if (_managed) {
+        _devices = (await deviceService.api.call('devices') as List)
+            .map((d) => Map<String, dynamic>.from(d as Map))
+            .toList();
+        _selectedDevices.addAll(
+          _devices.where((d) => d['current'] == true && d['enabled'] == true).map((d) => d['id'] as String),
+        );
+      }
       _session = ReviewSession(
+        applyOperation: _managed
+            ? (operation) async {
+                _checkAccount();
+                if (ref.read(readonlyModeProvider)) {
+                  throw StateError('Read-only mode is enabled');
+                }
+                await deviceService.api.call('decisions', body: operation);
+                _checkAccount();
+              }
+            : null,
+        undoOperation: _managed
+            ? (id) async {
+                _checkAccount();
+                if (ref.read(readonlyModeProvider)) {
+                  throw StateError('Read-only mode is enabled');
+                }
+                await deviceService.api.call('decisions/$id/undo', body: {});
+                _checkAccount();
+              }
+            : null,
         saved: file.existsSync() ? await file.readAsString() : null,
         save: (data) async {
           _checkAccount();
@@ -93,7 +132,14 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
         },
       );
       _albums = await ref.read(Store.api).albumsApi.getAllAlbums(isOwned: true) ?? [];
-      await _loadNext();
+      if (_session!.trashMode) {
+        _album = '__trash__';
+      }
+      // Pending mutations retain their original destinations across restart.
+      if (_session!.pending) {
+        _started = true;
+        await _loadNext();
+      }
     } catch (_) {
       _error = 'Could not load review progress. Try again; existing progress has not been reset.';
     }
@@ -112,7 +158,16 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
     final pendingId = _session!.pending ? _session!.lastId : preferredId;
     if (pendingId != null) {
       final item = await api.assetsApi.getAssetInfo(pendingId);
+      _checkAccount();
       if (item != null && item.ownerId == userId) {
+        // The visible next card has already been removed from the buffer.
+        // Put it back before Undo replaces it, otherwise deciding the restored
+        // card again skips that still-unreviewed card until the next refill.
+        final displaced = _asset;
+        if (displaced != null && displaced.id != item.id && !_session!.reviewed.contains(displaced.id)) {
+          _buffer.removeWhere((queued) => queued.id == displaced.id);
+          _buffer.insert(0, displaced);
+        }
         _asset = item;
         return;
       }
@@ -130,7 +185,7 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
     while (true) {
       final result = await api.searchApi.searchAssets(
         MetadataSearchDto(
-          albumIds: Optional.present(_album == null ? [] : [_album!]),
+          albumIds: Optional.present(_album == null || _trashMode ? [] : [_album!]),
           page: Optional.present(page),
           size: const Optional.present(250),
           takenAfter: _dates == null ? const Optional.absent() : Optional.present(_dates!.start),
@@ -143,7 +198,7 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
                     _dates!.end.day + 1,
                   ).subtract(const Duration(microseconds: 1)),
                 ),
-          withDeleted: const Optional.present(false),
+          withDeleted: Optional.present(_trashMode),
         ),
       );
       _checkAccount();
@@ -151,7 +206,7 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
         throw StateError('No search response');
       }
       for (final item in result.assets.items) {
-        if (item.ownerId == userId && !item.isTrashed && !_session!.reviewed.contains(item.id)) {
+        if (item.ownerId == userId && item.isTrashed == _trashMode && !_session!.reviewed.contains(item.id)) {
           _buffer.add(item);
         }
       }
@@ -195,7 +250,15 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
       return;
     }
     await _run(() async {
-      await _session!.decide(asset.id, toTrash: trash);
+      await _session!.decide(
+        asset.id,
+        toTrash: trash,
+        destinations: {
+          'server': _trashMode || _serverSelected,
+          'devices': _trashMode ? <String>[] : _selectedDevices.toList(),
+        },
+      );
+      await _refreshDelivery();
       _asset = null;
       await _loadNext();
     });
@@ -204,7 +267,9 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
   Future<void> _undo() async {
     await _run(() async {
       final id = _session!.lastId;
+      final operationId = _session!.operation?['operationId'] as String?;
       await _session!.undo();
+      await _refreshDelivery(operationId: operationId);
       await _loadNext(preferredId: id);
     });
   }
@@ -212,10 +277,150 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
   Widget _swipeMedia(Widget media, String assetId, bool enabled, bool trashEnabled) => ReviewSwipeCard(
     key: ValueKey(assetId),
     enabled: enabled && _session?.pending != true,
-    trashEnabled: trashEnabled,
-    onKeep: () => unawaited(_decide(false)),
-    onTrash: () => unawaited(_decide(true)),
+    trashMode: _trashMode,
+    trashEnabled: _trashMode || trashEnabled,
+    keepEnabled: !_trashMode || trashEnabled,
+    onKeep: () => unawaited(_decide(_trashMode)),
+    onTrash: () => unawaited(_decide(!_trashMode)),
     child: media,
+  );
+
+  Future<void> _refreshDelivery({String? operationId}) async {
+    if (!_managed) {
+      return;
+    }
+    try {
+      final service = ref.read(reviewDeviceServiceProvider);
+      await service.sync();
+      _checkAccount();
+      final id = operationId ?? _session?.operation?['operationId'];
+      if (id == null) {
+        _deliveryStatus = null;
+        return;
+      }
+      final result = await service.api.call('decisions/$id');
+      final deliveries = result['devices'] as List;
+      final summaries = <String>[];
+      for (final entry in {
+        'applied': 'updated',
+        'pending': 'pending',
+        'blocked': 'disabled',
+        'missing': 'without a matching copy',
+        'superseded': 'superseded',
+      }.entries) {
+        final count = deliveries.where((d) => d['status'] == entry.key).length;
+        if (count > 0) {
+          summaries.add('$count device${count == 1 ? '' : 's'} ${entry.value}');
+        }
+      }
+      _deliveryStatus = summaries.isEmpty ? 'Server action completed.' : summaries.join(' · ');
+    } catch (_) {
+      _deliveryStatus = 'Decision saved. Device delivery will retry when connected and permitted.';
+    }
+  }
+
+  Future<void> _reset() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Start reviewing again?'),
+        content: const Text(
+          'Clear all review progress for this account on this phone, including Trash review and Undo history. Photos will not be restored or deleted. Device settings and upload exclusions will stay in place.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Reset review progress')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) {
+      return;
+    }
+    await _run(() async {
+      _checkAccount();
+      await _session!.reset();
+      _buffer.clear();
+      _asset = null;
+      _started = false;
+      _deliveryStatus = null;
+    });
+  }
+
+  Widget _setup(bool enabled) => ListView(
+    padding: const EdgeInsets.all(20),
+    children: [
+      Text(
+        _trashMode ? 'Restore from server Trash' : 'Choose where Trash applies',
+        style: Theme.of(context).textTheme.titleLarge,
+      ),
+      const SizedBox(height: 8),
+      if (!_managed)
+        const Text(
+          'This server does not support device selection. Upgrade the server before using selective review. Stock Keep/Trash remains available with its normal sync behavior.',
+        ),
+      CheckboxListTile(
+        value: _trashMode || _serverSelected,
+        title: const Text('Server'),
+        secondary: const Icon(Icons.cloud_outlined),
+        subtitle: Text(_trashMode ? 'Restore the server copy only' : 'Move the server copy to Trash'),
+        onChanged: enabled && _managed && !_trashMode ? (v) => setState(() => _serverSelected = v!) : null,
+      ),
+      ..._devices.map(
+        (d) => CheckboxListTile(
+          value: !_trashMode && _selectedDevices.contains(d['id']),
+          secondary: Icon(d['enabled'] == true ? Icons.phone_android : Icons.phonelink_off),
+          title: Text('${d['name']}${d['current'] == true ? ' · this phone' : ''}'),
+          subtitle: Text(
+            _trashMode
+                ? 'Device Trash sources are not supported yet'
+                : d['reason'] as String? ??
+                      (d['online'] == true
+                          ? 'Available · confirmation required on device'
+                          : 'Offline · queued until it reconnects'),
+          ),
+          onChanged: enabled && !_trashMode && d['enabled'] == true
+              ? (v) => setState(() {
+                  if (v!) {
+                    _selectedDevices.add(d['id'] as String);
+                  } else {
+                    _selectedDevices.remove(d['id']);
+                  }
+                })
+              : null,
+        ),
+      ),
+      if (_trashMode)
+        const Text(
+          'Only server Trash is available in this version. Device Trash can differ and requires a connected device; those sources remain disabled.',
+        ),
+      if (!_trashMode && _managed)
+        const Text(
+          'Unchecked copies stay where they are. A server-deleted photo will not be automatically uploaded again by modified phones. Each device’s deletion settings are respected.',
+        ),
+      const SizedBox(height: 16),
+      FilledButton.icon(
+        icon: const Icon(Icons.play_arrow),
+        label: const Text('Start review'),
+        onPressed: enabled && (_trashMode || _serverSelected || _selectedDevices.isNotEmpty)
+            ? () => _run(() async {
+                if (_managed) {
+                  await ref.read(reviewDeviceServiceProvider).register();
+                  final current = (await ref.read(reviewDeviceServiceProvider).api.call('devices') as List)
+                      .map((d) => Map<String, dynamic>.from(d as Map))
+                      .toList();
+                  _checkAccount();
+                  _devices = current;
+                  _selectedDevices.removeWhere((id) => !current.any((d) => d['id'] == id && d['enabled'] == true));
+                  if (!_trashMode && !_serverSelected && _selectedDevices.isEmpty) {
+                    throw StateError('No enabled destination');
+                  }
+                }
+                _started = true;
+                await _loadNext(reset: true);
+              })
+            : null,
+      ),
+    ],
   );
 
   @override
@@ -224,13 +429,29 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
     final session = _session;
     ref.watch(currentUserProvider);
     final readOnly = ref.watch(readonlyModeProvider);
-    final trashEnabled = ref.watch(serverInfoProvider).serverFeatures.trash && !readOnly;
+    final trashEnabled =
+        !readOnly &&
+        (_trashMode || (_managed && !_serverSelected) || ref.watch(serverInfoProvider).serverFeatures.trash);
     final accountMatches = _scope == _currentScope;
     final enabled = !_busy && accountMatches;
     return PopScope(
       canPop: !_busy,
       child: Scaffold(
-        appBar: AppBar(title: const Text('Gallery Review')),
+        appBar: AppBar(
+          title: const Text('Gallery Review'),
+          actions: [
+            IconButton(
+              tooltip: 'Start over',
+              icon: const Icon(Icons.restart_alt),
+              onPressed: enabled && session != null && !session.pending ? _reset : null,
+            ),
+            IconButton(
+              tooltip: 'Review destinations',
+              icon: const Icon(Icons.devices),
+              onPressed: enabled && session?.pending != true ? () => setState(() => _started = false) : null,
+            ),
+          ],
+        ),
         body: SafeArea(
           child: Column(
             children: [
@@ -238,8 +459,10 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Column(
                   children: [
-                    const Text(
-                      'Swipe right to Keep, left to Trash. Device copies follow each device’s Immich sync settings.',
+                    Text(
+                      _trashMode
+                          ? 'Swipe left: Nothing · Swipe right: Restore to server'
+                          : 'Swipe left: Trash selected copies · Swipe right: Keep',
                     ),
                     Row(
                       children: [
@@ -249,6 +472,11 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
                             value: _album ?? '',
                             items: [
                               const DropdownMenuItem(value: '', child: Text('All albums')),
+                              DropdownMenuItem(
+                                value: '__trash__',
+                                enabled: _managed,
+                                child: const Text('Trash · server only'),
+                              ),
                               ..._albums.map(
                                 (a) => DropdownMenuItem(
                                   value: a.id,
@@ -258,8 +486,11 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
                             ],
                             onChanged: enabled && session?.pending != true
                                 ? (id) => _run(() async {
+                                    await session!.setTrashMode(id == '__trash__');
                                     _album = id == '' ? null : id;
-                                    await _loadNext(reset: true);
+                                    _started = false;
+                                    _asset = null;
+                                    _buffer.clear();
                                   })
                                 : null,
                           ),
@@ -326,7 +557,9 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
                   ),
                 ),
               Expanded(
-                child: asset == null
+                child: !_started && session != null
+                    ? _setup(enabled)
+                    : asset == null
                     ? Center(
                         child: Text(
                           _busy
@@ -373,35 +606,57 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
               if (session?.pending == true)
                 const Padding(
                   padding: EdgeInsets.all(8),
-                  child: Text('Trash confirmation pending. Retry Trash or Undo before continuing.'),
+                  child: Text('Action confirmation pending. Retry the same action or Undo before continuing.'),
                 ),
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Wrap(
-                  alignment: WrapAlignment.center,
-                  spacing: 12,
-                  runSpacing: 8,
-                  children: [
-                    OutlinedButton.icon(
-                      onPressed: enabled && session?.lastId != null && (!readOnly || session?.lastTrash != true)
-                          ? _undo
-                          : null,
-                      icon: const Icon(Icons.undo),
-                      label: const Text('Undo'),
-                    ),
-                    FilledButton.tonalIcon(
-                      onPressed: enabled && asset != null && trashEnabled ? () => _decide(true) : null,
-                      icon: const Icon(Icons.delete_outline),
-                      label: const Text('Trash'),
-                    ),
-                    FilledButton.icon(
-                      onPressed: enabled && asset != null && session?.pending != true ? () => _decide(false) : null,
-                      icon: const Icon(Icons.check),
-                      label: const Text('Keep'),
-                    ),
-                  ],
+              if (_deliveryStatus != null) Padding(padding: const EdgeInsets.all(8), child: Text(_deliveryStatus!)),
+              if (_started)
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Wrap(
+                    alignment: WrapAlignment.center,
+                    spacing: 12,
+                    runSpacing: 8,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: enabled && session?.lastId != null && (!readOnly || session?.lastTrash != true)
+                            ? _undo
+                            : null,
+                        icon: const Icon(Icons.undo),
+                        label: const Text('Undo'),
+                      ),
+                      FilledButton.tonalIcon(
+                        onPressed: enabled && asset != null && (_trashMode || trashEnabled) && session?.pending != true
+                            ? () => _decide(!_trashMode)
+                            : session?.pending == true && !_trashMode && enabled
+                            ? () => _decide(true)
+                            : null,
+                        style: _trashMode
+                            ? FilledButton.styleFrom(
+                                backgroundColor: Colors.grey.shade300,
+                                foregroundColor: Colors.black87,
+                              )
+                            : null,
+                        icon: Icon(_trashMode ? Icons.skip_next : Icons.delete_outline),
+                        label: Text(_trashMode ? 'Nothing' : 'Trash'),
+                      ),
+                      FilledButton.icon(
+                        onPressed:
+                            enabled &&
+                                asset != null &&
+                                (!_trashMode || trashEnabled) &&
+                                (session?.pending != true || _trashMode)
+                            ? () => _decide(_trashMode)
+                            : null,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF2E7D32),
+                          foregroundColor: Colors.white,
+                        ),
+                        icon: Icon(_trashMode ? Icons.restore_from_trash : Icons.check),
+                        label: Text(_trashMode ? 'Restore' : 'Keep'),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
               if (!trashEnabled) Text(readOnly ? 'Read-only mode is enabled.' : 'Trash is disabled on this server.'),
             ],
           ),

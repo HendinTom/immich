@@ -5,8 +5,11 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart' hide Store;
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:immich_mobile/domain/models/store.model.dart';
 import 'package:immich_mobile/domain/services/log.service.dart';
+import 'package:immich_mobile/entities/store.entity.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
+import 'package:immich_mobile/features/gallery_review/device_service.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/providers/infrastructure/platform.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/readonly_mode.provider.dart';
@@ -37,6 +40,8 @@ class AdvancedSettings extends HookConsumerWidget {
     );
     final readonlyModeEnabled = useAppSettingsState(AppSettingsEnum.readonlyModeEnabled);
 
+    final deleteThisPhone = useState(Store.get(StoreKey.galleryDeleteThisPhone, true));
+
     final logLevel = Level.LEVELS[levelId.value].name;
 
     useValueChanged(
@@ -66,6 +71,20 @@ class AdvancedSettings extends HookConsumerWidget {
 
     final advancedSettings = [
       SettingsSwitchListTile(
+        valueNotifier: deleteThisPhone,
+        title: 'Delete from this phone',
+        subtitle: 'Allow this app to remove photos from this phone. Choose server copies separately in Review.',
+        onChanged: (value) async {
+          deleteThisPhone.value = value;
+          await Store.put(StoreKey.galleryDeleteThisPhone, value);
+          try {
+            await ref.read(reviewDeviceServiceProvider).register();
+          } catch (_) {
+            /* Retry at next sync. */
+          }
+        },
+      ),
+      SettingsSwitchListTile(
         enabled: true,
         valueNotifier: advancedTroubleshooting,
         title: context.t.advanced_settings_troubleshooting_title,
@@ -78,12 +97,21 @@ class AdvancedSettings extends HookConsumerWidget {
               enabled: true,
               valueNotifier: manageLocalMediaAndroid,
               title: context.t.advanced_settings_sync_remote_deletions_title,
-              subtitle: context.t.advanced_settings_sync_remote_deletions_subtitle,
+              subtitle:
+                  'Allow server and other-device deletions or restores to affect this phone. Review destination choices are respected.',
               onChanged: (value) async {
                 if (value) {
                   final result = await ref.read(permissionRepositoryProvider).requestManageMediaPermission();
                   manageLocalMediaAndroid.value = result;
                   manageMediaAndroidPermission.value = result;
+                } else {
+                  manageLocalMediaAndroid.value = false;
+                }
+                await Store.put(StoreKey.manageLocalMediaAndroid, manageLocalMediaAndroid.value);
+                try {
+                  await ref.read(reviewDeviceServiceProvider).register();
+                } catch (_) {
+                  // The local setting is enforced even while the server is offline.
                 }
               },
             ),

@@ -120,6 +120,42 @@ void main() {
   });
 
   group('LocalSyncService - syncTrashedAssets behavior', () {
+    for (final managed in [true, false]) {
+      test('managed=$managed gates legacy server-state inference while preserving the native inventory', () async {
+        sut = LocalSyncService(
+          localAlbumRepository: mockLocalAlbumRepository,
+          trashedLocalAssetRepository: mockTrashedLocalAssetRepository,
+          assetMediaRepository: mockAssetMediaRepository,
+          permissionRepository: mockPermissionRepository,
+          nativeSyncApi: mockNativeSyncApi,
+          isGalleryManaged: () async => managed,
+        );
+        await sut.processTrashedAssets({});
+        verify(() => mockTrashedLocalAssetRepository.processTrashSnapshot(any())).called(1);
+        if (managed) {
+          verifyNever(() => mockTrashedLocalAssetRepository.getToRestore());
+          verifyNever(() => mockTrashedLocalAssetRepository.getToTrash());
+        } else {
+          verify(() => mockTrashedLocalAssetRepository.getToRestore()).called(1);
+          verify(() => mockTrashedLocalAssetRepository.getToTrash()).called(1);
+        }
+      });
+    }
+
+    test('policy discovery failure never falls back to inferred deletion or restoration', () async {
+      sut = LocalSyncService(
+        localAlbumRepository: mockLocalAlbumRepository,
+        trashedLocalAssetRepository: mockTrashedLocalAssetRepository,
+        assetMediaRepository: mockAssetMediaRepository,
+        permissionRepository: mockPermissionRepository,
+        nativeSyncApi: mockNativeSyncApi,
+        isGalleryManaged: () async => throw StateError('offline'),
+      );
+      await expectLater(sut.processTrashedAssets({}), throwsStateError);
+      verifyNever(() => mockTrashedLocalAssetRepository.getToRestore());
+      verifyNever(() => mockTrashedLocalAssetRepository.getToTrash());
+    });
+
     test('processes trashed snapshot, restores assets, and trashes local files', () async {
       final platformAsset = PlatformAsset(
         id: 'remote-id',

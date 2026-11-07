@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/constants/enums.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
+import 'package:immich_mobile/domain/models/store.model.dart';
+import 'package:immich_mobile/entities/store.entity.dart';
 import 'package:immich_mobile/extensions/platform_extensions.dart';
+import 'package:immich_mobile/features/gallery_review/device_service.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/presentation/actions/action.dart';
 import 'package:immich_mobile/providers/infrastructure/asset.provider.dart';
@@ -105,6 +108,9 @@ class DeleteAction extends AssetActionBuilder {
     List<String> localIds, {
     required bool isLocalOnly,
   }) async {
+    if (!Store.get(StoreKey.galleryDeleteThisPhone, true)) {
+      return null;
+    }
     final count = await _cleanupLocalAssets(context, ref, localIds, isLocalOnly: isLocalOnly);
     if (count <= 0 || !context.mounted) {
       return null;
@@ -121,7 +127,11 @@ class DeleteAction extends AssetActionBuilder {
     required bool isLocalOnly,
   }) async {
     final assetService = ref.read(assetServiceProvider);
-    if (localIds.isNotEmpty) {
+    final managed = await ref.read(reviewDeviceServiceProvider).register() != null;
+    if (!context.mounted) {
+      return null;
+    }
+    if (!managed && Store.get(StoreKey.galleryDeleteThisPhone, true) && localIds.isNotEmpty) {
       await _cleanupLocalAssets(context, ref, localIds, isLocalOnly: isLocalOnly);
       if (!context.mounted) {
         return null;
@@ -130,6 +140,9 @@ class DeleteAction extends AssetActionBuilder {
 
     final message = context.t.trash_action_prompt(count: remoteIds.length);
     await assetService.trash(remoteIds);
+    if (managed) {
+      await ref.read(reviewDeviceServiceProvider).sync();
+    }
     return message;
   }
 
@@ -155,7 +168,7 @@ class DeleteAction extends AssetActionBuilder {
     final message = context.t.delete_permanently_action_prompt(count: remoteIds.length);
     // Server first, so a failed request will not remove the local copy
     await assetService.delete(remoteIds);
-    if (localIds.isNotEmpty && context.mounted) {
+    if (Store.get(StoreKey.galleryDeleteThisPhone, true) && localIds.isNotEmpty && context.mounted) {
       await _cleanupLocalAssets(context, ref, localIds, requestCustomPrompt: false);
     }
 
