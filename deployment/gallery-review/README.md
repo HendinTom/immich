@@ -57,6 +57,9 @@ This requires a clean checkout and records the full Git commit. It builds the
 upstream server build stage, runs the server typecheck and unit tests, then
 builds the complete application image (including web). It runs that exact image
 in the disposable lab and repeats the stock API smoke before exporting it.
+For full source builds on the 16 GiB MacBook, allocate 8 GiB memory and 2 GiB
+swap to Docker Desktop; the default 4 GiB allocation exhausted memory compiling
+the web frontend. Server tests use one worker to limit memory pressure.
 AMD64 uses emulation on the MacBook and is slower than native ARM64 development.
 An ARM64 development verification is possible with `--platform linux/arm64`, but
 that bundle is deliberately rejected by the AMD64 deployment gate.
