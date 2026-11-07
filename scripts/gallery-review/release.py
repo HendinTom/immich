@@ -55,7 +55,7 @@ def main():
     run(['docker', 'buildx', 'build', '--platform', args.platform, '--load', '--target', 'server',
          '-f', 'server/Dockerfile', '-t', test_image, '.'])
     run(['docker', 'run', '--rm', '--platform', args.platform, '--entrypoint', '/bin/sh',
-         '-w', '/usr/src/app/server', test_image, '-ec', 'pnpm run check && pnpm run test --run'])
+         '-w', '/usr/src/app/server', test_image, '-ec', 'pnpm run check && pnpm run test --run --maxWorkers=1'])
     run(['docker', 'buildx', 'build', '--platform', args.platform, '--load',
          '--label', f'org.opencontainers.image.revision={revision}',
          '--build-arg', f'BUILD_ID={revision}', '-f', 'server/Dockerfile', '-t', image, '.'])
