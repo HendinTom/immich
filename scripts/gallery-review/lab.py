@@ -19,9 +19,12 @@ def run(*args, **kwargs):
 
 def require_local_engine():
     endpoint = os.environ.get('DOCKER_HOST')
-    if not endpoint:
-        endpoint = subprocess.check_output(
-            ['docker', 'context', 'inspect', '--format', '{{.Endpoints.docker.Host}}'], text=True).strip()
+    context = os.environ.get('DOCKER_CONTEXT')
+    if context or not endpoint:
+        args = ['docker', 'context', 'inspect']
+        if context:
+            args.append(context)
+        endpoint = subprocess.check_output(args + ['--format', '{{.Endpoints.docker.Host}}'], text=True).strip()
     if not endpoint.startswith('unix://'):
         raise RuntimeError('The disposable lab requires a local Unix Docker socket, not a remote engine')
 

@@ -160,5 +160,25 @@ esac
         self.assertNotIn('compose down', commands)
 
 
+class LocalEngineTests(unittest.TestCase):
+    def test_remote_docker_host_is_rejected(self):
+        from lab import require_local_engine
+        with patch.dict('os.environ', {'DOCKER_HOST': 'ssh://remote'}, clear=True):
+            with self.assertRaises(RuntimeError):
+                require_local_engine()
+
+    def test_context_override_cannot_hide_remote_engine(self):
+        from lab import require_local_engine
+        with patch.dict('os.environ', {'DOCKER_HOST': 'unix:///local.sock', 'DOCKER_CONTEXT': 'remote'}, clear=True):
+            with patch('subprocess.check_output', return_value='ssh://remote'):
+                with self.assertRaises(RuntimeError):
+                    require_local_engine()
+
+    def test_local_socket_is_accepted(self):
+        from lab import require_local_engine
+        with patch.dict('os.environ', {'DOCKER_HOST': 'unix:///local.sock'}, clear=True):
+            require_local_engine()
+
+
 if __name__ == '__main__':
     unittest.main()
