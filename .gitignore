@@ -29,5 +29,6 @@ vite.config.js.timestamp-*
 *.tsbuildinfo
 *.tsbuildInfo
 
-# Private Gallery Review lab credentials and release artifacts
+# Private Gallery Review lab credentials, images and release evidence
 .gallery-review/
+scripts/gallery-review/__pycache__/
