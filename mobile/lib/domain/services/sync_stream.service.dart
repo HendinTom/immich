@@ -41,6 +41,8 @@ class SyncStreamService {
   final SyncMigrationRepository _syncMigrationRepository;
   final ApiService _api;
   final Completer<void>? _cancellation;
+  final Future<bool> Function()? syncGallery;
+  bool _galleryManaged = false;
 
   SyncStreamService({
     required this._syncApiRepository,
@@ -51,12 +53,14 @@ class SyncStreamService {
     required this._permissionRepository,
     required this._syncMigrationRepository,
     required this._api,
+    this.syncGallery,
     this._cancellation,
   });
 
   bool get isCancelled => _cancellation?.isCompleted ?? false;
 
   Future<bool> sync() async {
+    _galleryManaged = await syncGallery?.call() ?? false;
     _logger.info("Remote sync request for user");
     final serverVersion = await _api.serverInfoApi.getServerVersion();
     if (serverVersion == null) {
@@ -101,6 +105,9 @@ class SyncStreamService {
       await Store.put(StoreKey.syncMigrationStatus, jsonEncode(migrations));
     }
 
+    if (_galleryManaged) {
+      await syncGallery?.call();
+    }
     return true;
   }
 
@@ -207,20 +214,20 @@ class SyncStreamService {
       case SyncEntityType.assetV1:
         final remoteSyncAssets = data.cast<SyncAssetV1>();
         await _syncStreamRepository.updateAssetsV1(remoteSyncAssets);
-        if (CurrentPlatform.isAndroid && Store.get(StoreKey.manageLocalMediaAndroid, false)) {
+        if (!_galleryManaged && CurrentPlatform.isAndroid && Store.get(StoreKey.manageLocalMediaAndroid, false)) {
           await _syncAssetTrashStatus(remoteSyncAssets.where((e) => e.deletedAt != null).map((e) => e.id).toList());
         }
         return;
       case SyncEntityType.assetV2:
         final remoteSyncAssets = data.cast<SyncAssetV2>();
         await _syncStreamRepository.updateAssetsV2(remoteSyncAssets);
-        if (CurrentPlatform.isAndroid && Store.get(StoreKey.manageLocalMediaAndroid, false)) {
+        if (!_galleryManaged && CurrentPlatform.isAndroid && Store.get(StoreKey.manageLocalMediaAndroid, false)) {
           await _syncAssetTrashStatus(remoteSyncAssets.where((e) => e.deletedAt != null).map((e) => e.id).toList());
         }
         return;
       case SyncEntityType.assetDeleteV1:
         final remoteSyncAssets = data.cast<SyncAssetDeleteV1>();
-        if (CurrentPlatform.isAndroid && Store.get(StoreKey.manageLocalMediaAndroid, false)) {
+        if (!_galleryManaged && CurrentPlatform.isAndroid && Store.get(StoreKey.manageLocalMediaAndroid, false)) {
           await _syncAssetDeletion(remoteSyncAssets.map((e) => e.assetId).toList());
         }
         return _syncStreamRepository.deleteAssetsV1(remoteSyncAssets);

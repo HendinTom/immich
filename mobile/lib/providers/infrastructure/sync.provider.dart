@@ -2,6 +2,7 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/services/hash.service.dart';
 import 'package:immich_mobile/domain/services/local_sync.service.dart';
 import 'package:immich_mobile/domain/services/sync_stream.service.dart';
+import 'package:immich_mobile/features/gallery_review/device_service.dart';
 import 'package:immich_mobile/infrastructure/repositories/sync_api.repository.dart';
 import 'package:immich_mobile/providers/api.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/cancel.provider.dart';
@@ -13,6 +14,7 @@ import 'package:immich_mobile/repositories/permission.repository.dart';
 final syncStreamServiceProvider = Provider((ref) {
   final db = ref.watch(driftProvider);
   return SyncStreamService(
+    syncGallery: ref.watch(reviewDeviceServiceProvider).sync,
     syncApiRepository: ref.watch(syncApiRepositoryProvider),
     syncStreamRepository: db.syncStreamRepository,
     localAssetRepository: db.localAssetRepository,

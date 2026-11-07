@@ -56,6 +56,11 @@ class AssetMediaRepository {
     return PhotoManager.editor.deleteWithIds(ids);
   }
 
+  Future<Set<String>> getTrashedIds() async =>
+      (await _nativeSyncApi.getTrashedAssets()).values.expand((assets) => assets).map((asset) => asset.id).toSet();
+
+  Future<bool> isPresent(String id) async => await AssetEntity.fromId(id) != null;
+
   Future<bool> _restoreFromTrashById(String mediaId, int type) async {
     try {
       return await _nativeSyncApi.restoreFromTrashById(mediaId, type);

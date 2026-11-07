@@ -11,6 +11,7 @@ import 'package:immich_mobile/domain/services/asset.service.dart';
 import 'package:immich_mobile/entities/store.entity.dart';
 import 'package:immich_mobile/extensions/network_capability_extensions.dart';
 import 'package:immich_mobile/extensions/platform_extensions.dart';
+import 'package:immich_mobile/features/gallery_review/device_service.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/infrastructure/repositories/backup.repository.dart';
 import 'package:immich_mobile/infrastructure/repositories/settings.repository.dart';
@@ -46,6 +47,7 @@ final foregroundUploadServiceProvider = Provider((ref) {
     ref.watch(connectivityApiProvider),
     ref.watch(assetMediaRepositoryProvider),
     ref.watch(assetServiceProvider),
+    filterReviewUploads: ref.watch(reviewDeviceServiceProvider).filterUploads,
   );
 });
 
@@ -61,8 +63,9 @@ class ForegroundUploadService {
     this._backupRepository,
     this._connectivityApi,
     this._assetMediaRepository,
-    this._assetService,
-  );
+    this._assetService, {
+    this.filterReviewUploads,
+  });
 
   final UploadRepository _uploadRepository;
   final StorageRepository _storageRepository;
@@ -70,6 +73,7 @@ class ForegroundUploadService {
   final ConnectivityApi _connectivityApi;
   final AssetMediaRepository _assetMediaRepository;
   final AssetService _assetService;
+  final Future<List<LocalAsset>> Function(List<LocalAsset>)? filterReviewUploads;
   final Logger _logger = Logger('ForegroundUploadService');
 
   bool shouldAbortUpload = false;
@@ -89,7 +93,10 @@ class ForegroundUploadService {
     UploadCallbacks callbacks = const UploadCallbacks(),
     bool useSequentialUpload = false,
   }) async {
-    final candidates = await _backupRepository.getCandidates(userId);
+    var candidates = await _backupRepository.getCandidates(userId);
+    if (filterReviewUploads != null) {
+      candidates = await filterReviewUploads!(candidates);
+    }
     if (candidates.isEmpty) {
       return;
     }

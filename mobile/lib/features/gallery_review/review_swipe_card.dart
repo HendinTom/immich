@@ -11,8 +11,12 @@ class ReviewSwipeCard extends StatefulWidget {
     required this.onKeep,
     required this.onTrash,
     required this.child,
+    this.trashMode = false,
+    this.keepEnabled = true,
   });
 
+  final bool trashMode;
+  final bool keepEnabled;
   final bool enabled;
   final bool trashEnabled;
   final VoidCallback onKeep;
@@ -48,7 +52,7 @@ class _ReviewSwipeCardState extends State<ReviewSwipeCard> {
     if (!widget.enabled) {
       return;
     }
-    if (distance > _threshold) {
+    if (distance > _threshold && widget.keepEnabled) {
       widget.onKeep();
     } else if (distance < -_threshold && widget.trashEnabled) {
       widget.onTrash();
@@ -78,11 +82,13 @@ class _ReviewSwipeCardState extends State<ReviewSwipeCard> {
             child: widget.child,
             builder: (context, distance, child) {
               final keep = distance >= 0;
-              final available = keep || widget.trashEnabled;
+              final available = keep ? widget.keepEnabled : widget.trashEnabled;
               final strength = (distance.abs() / _threshold).clamp(0.0, 1.0);
               final color = available
                   ? keep
                         ? const Color(0xFF2E7D32)
+                        : widget.trashMode
+                        ? const Color(0xFF757575)
                         : const Color(0xFFC62828)
                   : scheme.outline;
               return Stack(
@@ -125,9 +131,13 @@ class _ReviewSwipeCardState extends State<ReviewSwipeCard> {
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                             child: Text(
                               !available
-                                  ? 'Trash unavailable'
+                                  ? (widget.trashMode ? 'Restore unavailable' : 'Trash unavailable')
                                   : keep
-                                  ? 'KEEP →'
+                                  ? widget.trashMode
+                                        ? 'RESTORE →'
+                                        : 'KEEP →'
+                                  : widget.trashMode
+                                  ? '← NOTHING'
                                   : '← TRASH',
                               style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
                             ),
