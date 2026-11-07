@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 import shlex
 import subprocess
-from release import digest
+from release import digest, archive_config
 from homelab_smoke import load_config, check as smoke_check
 
 
@@ -27,6 +27,11 @@ def validate(folder, approved_commit):
     for name, checksum in manifest['files'].items():
         if digest(folder / name) != checksum:
             raise ValueError('Checksum mismatch: ' + name)
+    config_id, config = archive_config(folder / 'server-image.tar.gz', manifest['image'])
+    if config_id != manifest.get('image_config_id'):
+        raise ValueError('Archive config identity does not match the release manifest')
+    if config['os'] + '/' + config['architecture'] != manifest['platform']:
+        raise ValueError('Archive architecture does not match the release manifest')
     smoke = json.loads((folder / 'smoke.json').read_text())
     if smoke.get('passed') is not True or smoke.get('image_id') != manifest['image_id']:
         raise ValueError('Missing passing smoke evidence for this exact image')
@@ -65,7 +70,7 @@ def main():
     subprocess.run(['ssh', args.host, 'cd ' + shlex.quote(staging) + ' && sha256sum -c -'],
                    input=checksum_lines, text=True, check=True)
     remote_args = ['sh', staging + '/deploy-remote.sh', staging, args.deployment_dir,
-                   manifest['image'], manifest['image_id'], manifest['commit']]
+                   manifest['image'], manifest['image_config_id'], manifest['commit']]
     subprocess.run(['ssh', args.host, shlex.join(remote_args)], check=True)
     smoke_check(smoke_config, manifest['upstream_version'])
     print('Deployment accepted by the scoped read-only smoke check.')
