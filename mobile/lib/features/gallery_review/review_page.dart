@@ -10,6 +10,7 @@ import 'package:immich_mobile/data/store.dart';
 import 'package:immich_mobile/domain/models/store.model.dart';
 import 'package:immich_mobile/entities/store.entity.dart' as settings;
 import 'package:immich_mobile/features/gallery_review/device_service.dart';
+import 'package:immich_mobile/features/gallery_review/review_delivery_status.dart';
 import 'package:immich_mobile/features/gallery_review/review_session.dart';
 import 'package:immich_mobile/features/gallery_review/review_swipe_card.dart';
 import 'package:immich_mobile/features/gallery_review/review_video.dart';
@@ -33,6 +34,7 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
   ReviewSession? _session;
   AssetResponseDto? _asset;
   final List<AssetResponseDto> _buffer = [];
+  final Set<String> _prefetching = {};
   List<AlbumResponseDto> _albums = [];
   String? _album;
   DateTimeRange? _dates;
@@ -45,6 +47,14 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
   List<Map<String, dynamic>> _devices = [];
   final Set<String> _selectedDevices = {};
   String? _deliveryStatus;
+  late final _delivery = ReviewDeliveryStatus(
+    load: _loadDeliveryStatus,
+    publish: (status) {
+      if (mounted && _scope == _currentScope) {
+        setState(() => _deliveryStatus = status);
+      }
+    },
+  );
   bool get _trashMode => _album == '__trash__';
 
   String get _currentScope => '${settings.Store.get(StoreKey.serverEndpoint)}|${ref.read(currentUserProvider)?.id}';
@@ -58,6 +68,34 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
   void initState() {
     super.initState();
     unawaited(_initialize());
+  }
+
+  @override
+  void dispose() {
+    _delivery.dispose();
+    super.dispose();
+  }
+
+  RemoteImageProvider _preview(AssetResponseDto asset) => RemoteImageProvider(
+    url: getThumbnailUrlForRemoteId(asset.id, type: AssetMediaSize.preview),
+    decodeSize: MediaQuery.sizeOf(context) * MediaQuery.devicePixelRatioOf(context),
+  );
+
+  void _showAsset(AssetResponseDto? item) {
+    _asset = item;
+    if (!mounted || _scope != _currentScope) {
+      return;
+    }
+    // Bound speculative downloads and decode to the screen size. The displayed
+    // image uses the same provider key, so advancing reuses the warmed cache.
+    for (final next in _buffer.take(2).where((a) => a.type != AssetTypeEnum.VIDEO)) {
+      if (_prefetching.length >= 2 || !_prefetching.add(next.id)) {
+        continue;
+      }
+      unawaited(
+        precacheImage(_preview(next), context, onError: (_, _) {}).whenComplete(() => _prefetching.remove(next.id)),
+      );
+    }
   }
 
   Future<void> _initialize() async {
@@ -168,14 +206,14 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
           _buffer.removeWhere((queued) => queued.id == displaced.id);
           _buffer.insert(0, displaced);
         }
-        _asset = item;
+        _showAsset(item);
         return;
       }
     }
     while (_buffer.isNotEmpty) {
       final item = _buffer.removeAt(0);
       if (!_session!.reviewed.contains(item.id)) {
-        _asset = item;
+        _showAsset(item);
         return;
       }
     }
@@ -187,7 +225,7 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
         MetadataSearchDto(
           albumIds: Optional.present(_album == null || _trashMode ? [] : [_album!]),
           page: Optional.present(page),
-          size: const Optional.present(250),
+          size: const Optional.present(50),
           takenAfter: _dates == null ? const Optional.absent() : Optional.present(_dates!.start),
           takenBefore: _dates == null
               ? const Optional.absent()
@@ -211,11 +249,11 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
         }
       }
       if (_buffer.isNotEmpty) {
-        _asset = _buffer.removeAt(0);
+        _showAsset(_buffer.removeAt(0));
         return;
       }
       if (result.assets.nextPage == null) {
-        _asset = null;
+        _showAsset(null);
         return;
       }
       final next = int.tryParse(result.assets.nextPage!);
@@ -258,7 +296,9 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
           'devices': _trashMode ? <String>[] : _selectedDevices.toList(),
         },
       );
-      await _refreshDelivery();
+      // Keep/Nothing never starts a device sync. Destructive decisions have
+      // already been saved and accepted before delivery runs independently.
+      _delivery.refresh(_managed ? (_session!.operation?['operationId'] as String?) : null);
       _asset = null;
       await _loadNext();
     });
@@ -269,7 +309,7 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
       final id = _session!.lastId;
       final operationId = _session!.operation?['operationId'] as String?;
       await _session!.undo();
-      await _refreshDelivery(operationId: operationId);
+      _delivery.refresh(_managed ? operationId : null);
       await _loadNext(preferredId: id);
     });
   }
@@ -285,20 +325,14 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
     child: media,
   );
 
-  Future<void> _refreshDelivery({String? operationId}) async {
-    if (!_managed) {
-      return;
-    }
+  Future<String> _loadDeliveryStatus(String operationId) async {
+    _checkAccount();
     try {
       final service = ref.read(reviewDeviceServiceProvider);
       await service.sync();
       _checkAccount();
-      final id = operationId ?? _session?.operation?['operationId'];
-      if (id == null) {
-        _deliveryStatus = null;
-        return;
-      }
-      final result = await service.api.call('decisions/$id');
+      final result = await service.api.call('decisions/$operationId');
+      _checkAccount();
       final deliveries = result['devices'] as List;
       final summaries = <String>[];
       for (final entry in {
@@ -313,9 +347,9 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
           summaries.add('$count device${count == 1 ? '' : 's'} ${entry.value}');
         }
       }
-      _deliveryStatus = summaries.isEmpty ? 'Server action completed.' : summaries.join(' · ');
+      return summaries.isEmpty ? 'Server action completed.' : summaries.join(' · ');
     } catch (_) {
-      _deliveryStatus = 'Decision saved. Device delivery will retry when connected and permitted.';
+      return 'Decision saved. Device delivery will retry when connected and permitted.';
     }
   }
 
@@ -342,7 +376,7 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
       _buffer.clear();
       _asset = null;
       _started = false;
-      _deliveryStatus = null;
+      _delivery.refresh(null);
     });
   }
 
@@ -491,6 +525,7 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
                                     _started = false;
                                     _asset = null;
                                     _buffer.clear();
+                                    _delivery.refresh(null);
                                   })
                                 : null,
                           ),
@@ -589,9 +624,8 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
                                   )
                                 : _swipeMedia(
                                     Image(
-                                      image: RemoteImageProvider(
-                                        url: getThumbnailUrlForRemoteId(asset.id, type: AssetMediaSize.preview),
-                                      ),
+                                      key: ValueKey(asset.id),
+                                      image: _preview(asset),
                                       fit: BoxFit.contain,
                                       errorBuilder: (_, _, _) => const Center(child: Text('Preview unavailable')),
                                     ),

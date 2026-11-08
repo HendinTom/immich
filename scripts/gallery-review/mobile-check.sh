@@ -38,7 +38,9 @@ if "$build"; then
   mode=debug
   if "$test_release"; then
     mode=release
-    GALLERY_REVIEW_TEST_RELEASE=1 flutter build apk --release --target-platform android-arm64 --no-pub
+    # Switching from tests/debug to release must regenerate plugin registration
+    # without dev-only plugins (notably integration_test).
+    GALLERY_REVIEW_TEST_RELEASE=1 flutter build apk --release --target-platform android-arm64
   else
     flutter build apk --debug --target-platform android-arm64 --no-pub
   fi
