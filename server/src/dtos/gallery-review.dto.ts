@@ -4,6 +4,12 @@ import z from 'zod';
 export class GalleryDeviceDto extends createZodDto(
   z
     .object({
+      identityKey: z
+        .string()
+        .regex(/^[a-f0-9]{64}$/)
+        .optional(),
+      installationId: z.uuid().optional(),
+      replaceDeviceId: z.uuid().optional(),
       name: z.string().trim().min(1).max(100),
       platform: z.enum(['android', 'ios', 'other']),
       localEnabled: z.boolean(),

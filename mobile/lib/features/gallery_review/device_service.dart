@@ -4,10 +4,12 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:flutter_udid/flutter_udid.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/store.model.dart';
 import 'package:immich_mobile/entities/store.entity.dart';
+import 'package:immich_mobile/features/gallery_review/device_identity.dart';
 import 'package:immich_mobile/features/gallery_review/review_api.dart';
 import 'package:immich_mobile/infrastructure/repositories/local_asset.repository.dart';
 import 'package:immich_mobile/infrastructure/repositories/trashed_local_asset.repository.dart';
@@ -16,6 +18,7 @@ import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
 import 'package:immich_mobile/repositories/asset_media.repository.dart';
 import 'package:immich_mobile/repositories/permission.repository.dart';
 import 'package:logging/logging.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/sqlite3.dart';
 
@@ -68,7 +71,7 @@ class ReviewDeviceService {
   Future<bool> canManageMedia() async =>
       Platform.isAndroid && !readOnly && await permissions.hasManageMediaPermission();
 
-  Future<Map<String, dynamic>?> register() async {
+  Future<Map<String, dynamic>?> register({String? replaceDeviceId}) async {
     final expected = scope;
     final file = File('${(await journalFile(expected)).path}.registration');
     final state = await _load(file);
@@ -81,9 +84,22 @@ class ReviewDeviceService {
     _check(expected);
     final info = Platform.isAndroid ? await DeviceInfoPlugin().androidInfo : null;
     final canManage = info != null && info.version.sdkInt >= 31 && await permissions.hasManageMediaPermission();
+    final identity = <String, dynamic>{};
+    if (Platform.isAndroid && api.supportsDeviceIdentity) {
+      final androidId = await FlutterUdid.consistentUdid;
+      final package = await PackageInfo.fromPlatform();
+      final folder = await getApplicationSupportDirectory();
+      _check(expected);
+      identity.addAll({
+        'identityKey': reviewDeviceIdentity(androidId, package.packageName, Store.get(StoreKey.currentUser).id),
+        'installationId': loadInstallationId('${folder.path}/gallery-installation.sqlite'),
+        'replaceDeviceId': ?replaceDeviceId,
+      });
+    }
     final result = await api.call(
       'device',
       body: {
+        ...identity,
         'name': info?.model ?? 'This device',
         'platform': Platform.isAndroid
             ? 'android'

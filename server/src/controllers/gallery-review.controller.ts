@@ -19,7 +19,7 @@ export class GalleryReviewController {
   @Get('capabilities')
   @Authenticated()
   capabilities() {
-    return { protocol: 1, trashSources: ['server'] };
+    return { protocol: 1, deviceIdentity: 1, trashSources: ['server'] };
   }
 
   @Post('device')

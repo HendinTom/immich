@@ -7,6 +7,7 @@ import 'package:openapi/api.dart';
 class ReviewApi {
   ReviewApi(this.api);
   final ApiService api;
+  bool supportsDeviceIdentity = false;
 
   Future<dynamic> call(String path, {Object? body}) async {
     final response = await api.apiClient.invokeAPI(
@@ -27,6 +28,7 @@ class ReviewApi {
   Future<bool> available() async {
     try {
       final result = await call('capabilities');
+      supportsDeviceIdentity = result['deviceIdentity'] == 1;
       if (result['protocol'] != 1) {
         throw StateError('Unsupported Gallery Review protocol');
       }
