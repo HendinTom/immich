@@ -459,7 +459,9 @@ export class AssetRepository {
         const { rows } = await sql<{ blocked: boolean }>`SELECT EXISTS(
           SELECT 1 FROM gallery_review.exclusion e
           JOIN gallery_review.device d ON d.owner_id=e.owner_id
-          WHERE e.owner_id=${asset.ownerId} AND e.checksum=${asset.checksum} AND e.blocked AND d.session_id=${sessionId}
+          WHERE e.owner_id=${asset.ownerId} AND e.checksum=${asset.checksum} AND e.blocked AND (d.session_id=${sessionId} OR EXISTS (
+            SELECT 1 FROM gallery_review.device_session ds WHERE ds.device_id=d.id AND ds.session_id=${sessionId}
+          ))
         ) AS blocked`.execute(db);
         if (rows[0].blocked)
           throw new ConflictException('Gallery Review: automatic upload excluded after server deletion');

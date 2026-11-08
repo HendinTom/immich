@@ -64,6 +64,38 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
     }
   }
 
+  Future<void> _replaceLegacyDevice(Map<String, dynamic> device) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Replace this old device entry?'),
+        content: Text(
+          'Only continue if "${device['name']}" is an earlier installation on this phone. '
+          'Its pending phone actions will be cancelled and the old entry hidden. '
+          'Photos will not be deleted or restored. Other phones should keep their own entries.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Replace old entry')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) {
+      return;
+    }
+    await _run(() async {
+      _checkAccount();
+      final service = ref.read(reviewDeviceServiceProvider);
+      await service.register(replaceDeviceId: device['id'] as String);
+      final devices = (await service.api.call('devices') as List)
+          .map((d) => Map<String, dynamic>.from(d as Map))
+          .toList();
+      _checkAccount();
+      _devices = devices;
+      _selectedDevices.remove(device['id']);
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -339,6 +371,7 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
         'applied': 'updated',
         'pending': 'pending',
         'blocked': 'disabled',
+        'cancelled': 'cancelled after reinstall',
         'missing': 'without a matching copy',
         'superseded': 'superseded',
       }.entries) {
@@ -423,13 +456,22 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
               : null,
         ),
       ),
+      if (!_trashMode && _managed)
+        ..._devices
+            .where((d) => d['legacy'] == true && d['current'] != true)
+            .map(
+              (d) => TextButton(
+                onPressed: enabled ? () => _replaceLegacyDevice(d) : null,
+                child: Text('Replace old entry: ${d['name']}'),
+              ),
+            ),
       if (_trashMode)
         const Text(
           'Only server Trash is available in this version. Device Trash can differ and requires a connected device; those sources remain disabled.',
         ),
       if (!_trashMode && _managed)
         const Text(
-          'Unchecked copies stay where they are. A server-deleted photo will not be automatically uploaded again by modified phones. Each device’s deletion settings are respected.',
+          'Unchecked copies stay where they are. A server-deleted photo will not be automatically uploaded again by modified phones. Each device’s deletion settings are respected. After reinstall, old pending phone actions are cancelled and previous local Undo history is unavailable. The official Immich app has separate backup and deletion settings that can also affect these photos.',
         ),
       const SizedBox(height: 16),
       FilledButton.icon(

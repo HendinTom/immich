@@ -18,8 +18,8 @@ All paths below are relative to `/api/gallery-review`. POST bodies reject unknow
 
 | Method / path | Body / result |
 | --- | --- |
-| GET capabilities | `protocol: 1`, `trashSources: ["server"]` |
-| POST device | `name`, `platform`, `localEnabled`, `remoteEnabled`, `canManage`; returns server-assigned `deviceId` |
+| GET capabilities | `protocol: 1`, `deviceIdentity: 1`, `trashSources: ["server"]` |
+| POST device | `name`, `platform`, `localEnabled`, `remoteEnabled`, `canManage`, optional paired `identityKey`/`installationId`, optional `replaceDeviceId`; returns server-assigned `deviceId` and `reinstalled` |
 | GET devices | Only the authenticated account's devices, including availability and disabled reason |
 | GET commands | Up to 250 eligible pending checksum commands with revision, action and origin (`local`) |
 | POST commands/ack | `revision`, `status` (`applied`, `missing`, `blocked`); stale acknowledgements cannot consume newer commands |
@@ -28,13 +28,17 @@ All paths below are relative to `/api/gallery-review`. POST bodies reject unknow
 | GET decisions/:id | `undone` and destination delivery states; superseded work is explicitly reported |
 | POST decisions/:id/undo | Account-owned idempotent Undo; also cancels an uncertain request that never reached the server |
 
-Device identity is scoped to an authenticated login session. Revoking it disables the entry; logging in again registers a new entry. Devices are not discoverable/manageable across accounts. The server rechecks destination settings when accepting a decision; the phone checks its current setting again before native mutation. Opt-out cancels queued commands rather than replaying them after a later opt-in.
+Android identity is scoped to the authenticated account, Android user/device, signing key and package. A separate app-private installation UUID survives updates and sign-out, but not uninstall or clear-data. The server advertises `deviceIdentity: 1`; older clients remain supported. The current session's legacy entry is adopted in place on update. A returning identity reconnects its existing entry, and superseded sessions cannot reclaim it. Reauthentication in the same installation preserves queued work and local-action semantics even after session revocation.
+
+A different installation UUID retires prior delivery records and cancels pending phone work; later Undo cannot revive those records. New explicitly requested work is allowed. Server media and account upload exclusions are unchanged. Local native receipts and review/Undo history do not survive uninstall. Old modified sessions retain upload exclusions; stock upload sessions retain stock behavior.
+
+Historical entries without stable identity are never merged by name. An explicit, confirmed `replaceDeviceId` can retire only another same-account legacy entry, cancelling its pending delivery and hiding it from destinations. No photos are mutated. Normal app updates preserve settings and journals. Factory reset, Android profile changes and signing-key/package changes may require explicit reconciliation; the official app remains a separate client whose backup/deletion settings can affect shared phone media. Devices are not discoverable/manageable across accounts. The server rechecks destination settings when accepting a decision; the phone checks its current setting again before native mutation. Opt-out cancels queued commands rather than replaying them after a later opt-in.
 
 ## Persistence and ordering
 
 The migration adds the `gallery_review` schema, plus an asset trigger. No upstream API schema changes are needed. The trigger captures stock trash/restore/purge events, preserves exclusions for Live Photo motion files, and does not broaden a prior selective decision during background purge. Custom decisions suppress broadcast within their transaction and enqueue only selected destinations.
 
-Account-scoped transaction locks serialize review decisions and Undo. A client operation UUID makes retries idempotent. Recovery is account-owned so signing in again can resolve a pending server decision after the old session is revoked; device registration itself remains session-bound. Each device/checksum has a revision so late acknowledgements cannot acknowledge a newer action. Undo refuses to overwrite subsequent server trash-state changes or newer review decisions. Metadata-only changes do not invalidate Undo. Permanently removed server media cannot be restored; Undo reports a conflict in that case.
+Account-scoped transaction locks serialize review decisions and Undo. A client operation UUID makes retries idempotent. Recovery is account-owned so signing in again can resolve a pending server decision after the old session is revoked; device authorization remains bound to the current authenticated session, independently of persistent phone identity. Each device/checksum has a revision so late acknowledgements cannot acknowledge a newer action. Undo refuses to overwrite subsequent server trash-state changes or newer review decisions. Metadata-only changes do not invalidate Undo. Permanently removed server media cannot be restored; Undo reports a conflict in that case.
 
 Modified uploads check exclusions both before and after insert, protecting against concurrent purge/uniqueness races. The phone also filters backup candidates. Upload exclusions are user-owned and deleted when that account is removed.
 

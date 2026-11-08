@@ -38,7 +38,7 @@ class _Device extends ReviewDeviceService {
   @override
   Future<File> journalFile(String expected) async => file;
   @override
-  Future<Map<String, dynamic>?> register() async => {'protocol': 1};
+  Future<Map<String, dynamic>?> register({String? replaceDeviceId}) async => {'protocol': 1};
 }
 
 void main() {

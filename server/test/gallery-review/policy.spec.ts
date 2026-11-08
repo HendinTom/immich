@@ -9,6 +9,7 @@ import { LoggingRepository } from 'src/repositories/logging.repository.js';
 import { SystemMetadataRepository } from 'src/repositories/system-metadata.repository.js';
 import { DB } from 'src/schema/index.js';
 import { down, up } from 'src/schema/migrations/1794078000000-GalleryReview.js';
+import { down as identityDown, up as identityUp } from 'src/schema/migrations/1794164400000-GalleryDeviceIdentity.js';
 import { AssetService } from 'src/services/asset.service.js';
 import { GalleryReviewService } from 'src/services/gallery-review.service.js';
 import { getKyselyConfig } from 'src/utils/database.js';
@@ -247,10 +248,146 @@ it('same-account sign-in can recover a pending server decision after the old ses
 
 it('extension rollback/reapply preserves upstream assets', async () => {
   const before = await db.selectFrom('asset').select('id').execute();
+  await identityDown(db);
   await down(db);
   const absent = await sql`SELECT to_regnamespace('gallery_review') AS schema`.execute(db);
   expect(absent.rows).toEqual([{ schema: null }]);
   await up(db);
+  await identityUp(db);
   const after = await db.selectFrom('asset').select('id').execute();
   expect(after.map((a) => a.id).sort()).toEqual(before.map((a) => a.id).sort());
+});
+
+const identity = () => ({ identityKey: randomUUID().replaceAll('-', '').repeat(2), installationId: randomUUID() });
+async function loginAgain(auth: Awaited<ReturnType<typeof scenario>>['auth']) {
+  const { session } = await ctx.newSession({ userId: auth.user.id });
+  return factory.auth({ user: auth.user, session });
+}
+
+it('adopts an existing session on update and preserves pending delivery and Undo', async () => {
+  const { auth, first, asset } = await scenario();
+  const dto = decision(asset.id, [first.deviceId], false);
+  await sut.decide(auth, dto);
+  const key = identity();
+  expect(await sut.register(auth, { ...policy, ...key })).toMatchObject({
+    deviceId: first.deviceId,
+    reinstalled: false,
+  });
+  const before = await sut.commands(auth);
+  await sut.register(auth, { ...policy, ...key });
+  expect(await sut.commands(auth)).toEqual(before);
+  await sut.undo(auth, dto.operationId);
+  expect(await sut.commands(auth)).toMatchObject([{ action: 'restore', local: true }]);
+});
+
+it('reconnects after reinstall, cancels old work, blocks stale sessions and preserves exclusions', async () => {
+  const { auth, first, asset } = await scenario();
+  const key = identity();
+  await sut.register(auth, { ...policy, ...key });
+  const dto = decision(asset.id, [first.deviceId]);
+  await sut.decide(auth, dto);
+  const pending = await sut.commands(auth);
+  const returning = await loginAgain(auth);
+  const installed = { ...key, installationId: randomUUID() };
+  expect(await sut.register(returning, { ...policy, ...installed })).toMatchObject({
+    deviceId: first.deviceId,
+    reinstalled: true,
+  });
+  expect(await sut.commands(returning)).toEqual([]);
+  expect(await sut.operation(returning, dto.operationId)).toMatchObject({ devices: [{ status: 'cancelled' }] });
+  expect(await state(asset.id)).toBe('trashed');
+  expect((await sut.exclusions(returning, { checksums: [asset.checksum.toString('base64')] })).blocked).toHaveLength(1);
+  await expect(sut.register(auth, { ...policy, ...key })).rejects.toThrow('replaced');
+  await expect(sut.register(auth, policy)).rejects.toThrow('replaced');
+  await expect(sut.ack(auth, { revision: pending[0].revision, status: 'applied' })).rejects.toThrow();
+  await sut.undo(returning, dto.operationId);
+  expect(await state(asset.id)).toBe('active');
+  expect(await sut.commands(returning)).toEqual([]);
+  await sut.decide(returning, decision(asset.id, [first.deviceId], false));
+  expect(await sut.commands(returning)).toMatchObject([{ action: 'trash', local: true }]);
+});
+
+it('retains local commands after logout/login with the same installation and remote sync disabled', async () => {
+  const { auth, first, asset } = await scenario();
+  const key = identity();
+  await sut.register(auth, { ...policy, ...key, remoteEnabled: false });
+  await sut.decide(auth, decision(asset.id, [first.deviceId], false));
+  await db.deleteFrom('session').where('id', '=', auth.session!.id).execute();
+  const returning = await loginAgain(auth);
+  expect(await sut.register(returning, { ...policy, ...key, remoteEnabled: false })).toMatchObject({
+    deviceId: first.deviceId,
+    reinstalled: false,
+  });
+  expect(await sut.commands(returning)).toMatchObject([{ local: true, action: 'trash' }]);
+});
+
+it('keeps matching identities isolated by account and distinct phones separate', async () => {
+  const a = await scenario();
+  const b = await scenario();
+  const key = identity();
+  const first = await sut.register(a.auth, { ...policy, ...key });
+  const second = await sut.register(b.auth, { ...policy, ...key });
+  expect(first.deviceId).not.toBe(second.deviceId);
+  expect((await sut.devices(a.auth)).some((d) => d.id === second.deviceId)).toBe(false);
+  const next = await loginAgain(a.auth);
+  const different = await sut.register(next, { ...policy, ...identity() });
+  expect(different.deviceId).not.toBe(first.deviceId);
+});
+
+it('serializes concurrent reconnects and never duplicates the stable identity', async () => {
+  const { auth, first } = await scenario();
+  const key = identity();
+  await sut.register(auth, { ...policy, ...key });
+  const a = await loginAgain(auth);
+  const b = await loginAgain(auth);
+  const results = await Promise.all([sut.register(a, { ...policy, ...key }), sut.register(b, { ...policy, ...key })]);
+  expect(results.map((r) => r.deviceId)).toEqual([first.deviceId, first.deviceId]);
+  expect((await sut.devices(b)).filter((d) => !d.legacy)).toHaveLength(1);
+});
+
+it('replaces only explicitly selected same-account legacy entries and cancels their Undo delivery', async () => {
+  const { auth, other, first, second, asset } = await scenario();
+  const key = identity();
+  await sut.register(auth, { ...policy, ...key });
+  const dto = decision(asset.id, [second.deviceId], false);
+  await sut.decide(auth, dto);
+  await sut.register(auth, { ...policy, ...key, replaceDeviceId: second.deviceId });
+  expect((await sut.devices(auth)).map((d) => d.id)).toEqual([first.deviceId]);
+  await expect(sut.register(other, policy)).rejects.toThrow('replaced');
+  await sut.undo(auth, dto.operationId);
+  expect(await sut.commands(auth)).toEqual([]);
+  const foreign = await scenario();
+  await expect(sut.register(auth, { ...policy, ...key, replaceDeviceId: foreign.first.deviceId })).rejects.toThrow();
+});
+
+it('new stock commands after reinstall can run, while old completed delivery is not restored by Undo', async () => {
+  const { auth, first, asset } = await scenario();
+  const key = identity();
+  await sut.register(auth, { ...policy, ...key });
+  const dto = decision(asset.id, [first.deviceId], false);
+  await sut.decide(auth, dto);
+  const [command] = await sut.commands(auth);
+  await sut.ack(auth, { revision: command.revision, status: 'applied' });
+  const returning = await loginAgain(auth);
+  await sut.register(returning, { ...policy, ...key, installationId: randomUUID() });
+  await sut.undo(returning, dto.operationId);
+  expect(await sut.commands(returning)).toEqual([]);
+  await db.updateTable('asset').set({ deletedAt: new Date(), status: 'trashed' }).where('id', '=', asset.id).execute();
+  expect(await sut.commands(returning)).toMatchObject([{ action: 'trash', local: null }]);
+});
+
+it('retains upload exclusions for replaced login sessions without changing stock upload behavior', async () => {
+  const { auth, asset } = await scenario();
+  const key = identity();
+  await sut.register(auth, { ...policy, ...key });
+  await sut.decide(auth, decision(asset.id));
+  await db.deleteFrom('asset').where('id', '=', asset.id).execute();
+  const returning = await loginAgain(auth);
+  await sut.register(returning, { ...policy, ...key, installationId: randomUUID() });
+  const repository = ctx.get(AssetRepository);
+  const copy = { ...asset, id: randomUUID() };
+  await expect(repository.createForUpload(copy, auth.session!.id)).rejects.toThrow('excluded');
+  await expect(repository.createForUpload(copy, returning.session!.id)).rejects.toThrow('excluded');
+  const stock = await loginAgain(auth);
+  await expect(repository.createForUpload(copy, stock.session!.id)).resolves.toBeDefined();
 });
