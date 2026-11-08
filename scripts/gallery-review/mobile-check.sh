@@ -5,11 +5,13 @@ root=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$root/mobile"
 bootstrap=false
 build=false
+test_release=false
 for arg in "$@"; do
   case "$arg" in
     --bootstrap) bootstrap=true ;;
     --build) build=true ;;
-    *) echo "Usage: $0 [--bootstrap] [--build]" >&2; exit 2 ;;
+    --test-release) build=true; test_release=true ;;
+    *) echo "Usage: $0 [--bootstrap] [--build | --test-release]" >&2; exit 2 ;;
   esac
 done
 if "$bootstrap"; then
@@ -33,18 +35,26 @@ dart analyze lib/features/gallery_review test/features/gallery_review \
   lib/widgets/settings/advanced_settings.dart
 flutter test --no-pub test/features/gallery_review test/domain/services/sync_stream_service_test.dart test/domain/services/local_sync_service_test.dart test/medium/repositories/trashed_local_asset_repository_test.dart
 if "$build"; then
-  flutter build apk --debug --target-platform android-arm64 --no-pub
-  python3 - "$root" <<'PY'
+  mode=debug
+  if "$test_release"; then
+    mode=release
+    GALLERY_REVIEW_TEST_RELEASE=1 flutter build apk --release --target-platform android-arm64 --no-pub
+  else
+    flutter build apk --debug --target-platform android-arm64 --no-pub
+  fi
+  python3 - "$root" "$mode" <<'PY'
 import hashlib,json,shutil,subprocess,sys
 from pathlib import Path
-root=Path(sys.argv[1]); revision=subprocess.check_output(['git','rev-parse','HEAD'],cwd=root,text=True).strip()
+root=Path(sys.argv[1]); mode=sys.argv[2]; revision=subprocess.check_output(['git','rev-parse','HEAD'],cwd=root,text=True).strip()
 dirty=bool(subprocess.check_output(['git','status','--porcelain','--untracked-files=all'],cwd=root,text=True).strip())
-out=root/'.gallery-review/mobile'/revision;out.mkdir(parents=True,exist_ok=True)
-apk=out/'gallery-review-debug.apk';shutil.copyfile(root/'mobile/build/app/outputs/flutter-apk/app-debug.apk',apk)
+out=root/'.gallery-review/mobile'/revision
+if mode == 'release': out=out/'test-release'
+out.mkdir(parents=True,exist_ok=True)
+apk=out/f'gallery-review-{mode}.apk';shutil.copyfile(root/f'mobile/build/app/outputs/flutter-apk/app-{mode}.apk',apk)
 checksum=hashlib.sha256(apk.read_bytes()).hexdigest()
 (apk.with_suffix('.apk.sha256')).write_text(checksum+'  '+apk.name+'\n')
-(out/'manifest.json').write_text(json.dumps({'commit':revision,'dirty':dirty,'artifact':apk.name,'sha256':checksum,'platform':'android-arm64','signing':'debug','checks':['format','targeted analysis','review and native sync tests','APK build']},indent=2)+'\n')
-print('Debug APK:',apk)
+(out/'manifest.json').write_text(json.dumps({'commit':revision,'dirty':dirty,'artifact':apk.name,'sha256':checksum,'platform':'android-arm64','build_mode':mode,'application_id':'app.alextran.immich.debug','signing':'debug','checks':['format','targeted analysis','review and native sync tests','APK build']},indent=2)+'\n')
+print(f'{mode.title()} APK (test signing):',apk)
 print('Source has uncommitted changes.' if dirty else 'Artifact matches the committed source revision.')
 PY
 fi
