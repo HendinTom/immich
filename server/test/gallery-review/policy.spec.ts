@@ -1,5 +1,6 @@
 import { Kysely, sql } from 'kysely';
 import { randomUUID } from 'node:crypto';
+import { AssetStatus } from 'src/enum.js';
 import { AccessRepository } from 'src/repositories/access.repository.js';
 import { AssetRepository } from 'src/repositories/asset.repository.js';
 import { ConfigRepository } from 'src/repositories/config.repository.js';
@@ -139,7 +140,7 @@ it('stock changes obey current-phone and remote opt-ins independently', async ()
     await sql`SELECT set_config('gallery_review.source_session', ${auth.session!.id}, true)`.execute(tx);
     await tx
       .updateTable('asset')
-      .set({ deletedAt: new Date(), status: 'trashed' as never })
+      .set({ deletedAt: new Date(), status: AssetStatus.Trashed as never })
       .where('id', '=', asset.id)
       .execute();
   });
@@ -169,7 +170,7 @@ it('Undo refuses to overwrite a subsequent stock state change', async () => {
     .execute();
   await db
     .updateTable('asset')
-    .set({ deletedAt: new Date(), status: 'trashed' as never })
+    .set({ deletedAt: new Date(), status: AssetStatus.Trashed as never })
     .where('id', '=', asset.id)
     .execute();
   await expect(sut.undo(auth, dto.operationId)).rejects.toThrow('changed');
@@ -372,7 +373,7 @@ it('new stock commands after reinstall can run, while old completed delivery is 
   await sut.register(returning, { ...policy, ...key, installationId: randomUUID() });
   await sut.undo(returning, dto.operationId);
   expect(await sut.commands(returning)).toEqual([]);
-  await db.updateTable('asset').set({ deletedAt: new Date(), status: 'trashed' }).where('id', '=', asset.id).execute();
+  await db.updateTable('asset').set({ deletedAt: new Date(), status: AssetStatus.Trashed }).where('id', '=', asset.id).execute();
   expect(await sut.commands(returning)).toMatchObject([{ action: 'trash', local: null }]);
 });
 
