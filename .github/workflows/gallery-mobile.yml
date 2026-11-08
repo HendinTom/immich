@@ -28,10 +28,10 @@ jobs:
           chmod +x "$RUNNER_TEMP/gallery-bin/openapi-generator-cli"
           echo "$RUNNER_TEMP/gallery-bin" >> "$GITHUB_PATH"
       - name: Generate, check, test and build
-        run: bash scripts/gallery-review/mobile-check.sh --bootstrap --build
-      - name: Retain debug APK and provenance
+        run: bash scripts/gallery-review/mobile-check.sh --bootstrap --test-release
+      - name: Retain optimized test APK and provenance
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: gallery-review-android-debug
+          name: gallery-review-android-test-release
           path: .gallery-review/mobile/
           include-hidden-files: true

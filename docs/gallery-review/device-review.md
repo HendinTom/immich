@@ -33,3 +33,12 @@ Use synthetic photos on an Android phone before production:
 8. Sign out/switch users: devices, operations and journals remain account-scoped.
 
 A simulator/emulator cannot establish manufacturer-specific permission and background behavior. Real-phone acceptance remains a release gate, alongside review of the separate server PR.
+# Android test distribution
+
+Use `bash scripts/gallery-review/mobile-check.sh --test-release` for phone testing.
+This builds optimized Flutter release code with the visible name **Immich**, while
+retaining `app.alextran.immich.debug` and the local test signing key so it updates
+the existing test installation without removing its data. It does not replace
+the official Immich app. Keep the signing key private and use the same build
+machine/key for published updates; CI's temporary key cannot update an APK
+signed on another machine. `--build` remains available for debugger builds.
