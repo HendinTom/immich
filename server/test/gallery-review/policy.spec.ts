@@ -372,6 +372,7 @@ it('new stock commands after reinstall can run, while old completed delivery is 
   const returning = await loginAgain(auth);
   await sut.register(returning, { ...policy, ...key, installationId: randomUUID() });
   await sut.undo(returning, dto.operationId);
+  expect(await sut.operation(returning, dto.operationId)).toMatchObject({ devices: [{ status: 'unavailable' }] });
   expect(await sut.commands(returning)).toEqual([]);
   await db.updateTable('asset').set({ deletedAt: new Date(), status: AssetStatus.Trashed }).where('id', '=', asset.id).execute();
   expect(await sut.commands(returning)).toMatchObject([{ action: 'trash', local: null }]);

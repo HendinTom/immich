@@ -372,6 +372,7 @@ class _GalleryReviewPageState extends ConsumerState<GalleryReviewPage> {
         'pending': 'pending',
         'blocked': 'disabled',
         'cancelled': 'cancelled after reinstall',
+        'unavailable': 'without recovery history after reinstall',
         'missing': 'without a matching copy',
         'superseded': 'superseded',
       }.entries) {

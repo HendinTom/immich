@@ -308,7 +308,7 @@ export class GalleryReviewService {
     const { rows } = await sql<{
       deviceId: string;
       status: string;
-    }>`SELECT target AS "deviceId",CASE WHEN d.retired AND d.status='blocked' THEN 'cancelled' ELSE COALESCE(d.status,'superseded') END AS status
+    }>`SELECT target AS "deviceId",CASE WHEN d.retired THEN CASE WHEN d.status='blocked' THEN 'cancelled' ELSE 'unavailable' END ELSE COALESCE(d.status,'superseded') END AS status
       FROM gallery_review.operation o CROSS JOIN LATERAL unnest(o.targets) AS target
       LEFT JOIN gallery_review.delivery d ON d.device_id=target AND d.operation_id=o.id
       WHERE o.owner_id=${auth.user.id} AND o.id=${id}`.execute(this.db);
